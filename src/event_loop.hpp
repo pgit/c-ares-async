@@ -6,8 +6,10 @@
 // (c_ares_async/runtime.hpp) does not need to show anybody:
 //
 //    wait_type, Descriptor   -- readiness on a descriptor of c-ares', which it keeps owning
-//    Timer                   -- the one timer that ares_timeout() asks for
-//    make_endpoint()         -- an Endpoint of the runtime's own, from a sockaddr of c-ares'
+//    address_text()          -- the text of an address that c-ares hands over in its wire format
+//    make_endpoint()         -- a TcpEndpoint of the runtime's own, from a sockaddr of c-ares'
+//
+// The timer that ares_timeout() asks for is the runtime layer's, detail::Timer.
 //
 // asio/event_loop.hpp has the documentation of each, and corosio/event_loop.hpp the same
 // definitions in the same order.

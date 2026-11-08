@@ -39,17 +39,23 @@ What the two runtimes are
    * - :cpp:type:`Executor`
      - ``boost::asio::any_io_executor``
      - ``boost::capy::any_executor``
-   * - :cpp:type:`Endpoint`
+   * - :cpp:type:`TcpEndpoint`
      - ``boost::asio::ip::tcp::endpoint``
      - ``boost::corosio::endpoint``
    * - :cpp:type:`error_code`
      - ``boost::system::error_code``
      - ``std::error_code``
+   * - :cpp:type:`results\<Ts...> <results>`
+     - ``std::tuple<error_code, Ts...>``
+     - ``boost::capy::results<Ts...>``
+   * - :cpp:type:`IoTask\<Ts...> <IoTask>`
+     - ``boost::asio::awaitable<results<Ts...>>``
+     - ``boost::capy::task<results<Ts...>>``
    * - :cpp:var:`errors::canceled`
-     - ``boost::asio::error::operation_aborted``
+     - ``errc::operation_canceled``, of the generic category
      - ``boost::capy::error::canceled``
    * - Cancelling a lookup
-     - a cancellation slot, ``cancel_after()`` with a timer of its own
+     - a cancellation of the terminal type, through a cancellation slot; ``cancel_after()``, with a timer of its own
      - the ``std::stop_token`` of the awaiting coroutine, ``corosio::timeout()``
 
 Both have the same coroutine spelling, which yields the error and the result as a tuple:
@@ -58,10 +64,12 @@ Both have the same coroutine spelling, which yields the error and the result as 
 
    auto [ec, endpoints] = co_await resolver.resolve("example.com", "443");
 
-That is what the shared tests are written in. On Asio it is :cpp:func:`async_resolve() <resolver::async_resolve>` with
-``as_tuple(use_awaitable)`` behind it; on Corosio it is a ``capy::task``, since
-``capy::results<T>`` *is* ``std::tuple<std::error_code, T>`` -- so a lookup goes into
-``corosio::timeout()`` and ``capy::when_all()`` as it is, with nothing in between.
+That is what the shared tests are written in. It is an :cpp:type:`IoTask` on both: on Asio,
+:cpp:func:`async_resolve() <resolver::async_resolve>` with ``as_tuple(use_awaitable)`` behind it;
+on Corosio a ``capy::task`` of ``capy::results<T>``, which *is* ``std::tuple<std::error_code, T>``
+-- so a lookup goes into ``corosio::timeout()`` and ``capy::when_all()`` as it is, with nothing in
+between. Either way, :cpp:var:`errors::canceled` compares equal to ``errc::operation_canceled``, as
+the runtime's own operations do when they are cancelled.
 
 Where the code is
 -----------------
@@ -74,7 +82,7 @@ or ``C_ARES_ASYNC_COROSIO`` (exactly one of which is 1, from the generated ``c_a
    * - :src:`include/c_ares_async/runtime.hpp`
      - the vocabulary of the interface, which picks ``asio/runtime.hpp`` or ``corosio/runtime.hpp``
    * - :src:`src/event_loop.hpp`
-     - the event loop the implementation drives: ``Descriptor``, ``Timer``, ``make_endpoint()``, again one file per runtime
+     - the event loop the implementation drives: ``Descriptor`` and ``make_endpoint()``, again one file per runtime; the ``Timer`` is the runtime layer's
    * - :src:`include/c_ares_async/resolver.hpp`
      - the front end: the completion-token operations are ASIO-only
 
@@ -91,6 +99,13 @@ is written once, against those names. ``asio/runtime.hpp`` documents each of the
 ``corosio/runtime.hpp`` has the same definitions in the same order, so the pair can be read side by
 side; the same goes for ``src/asio/event_loop.hpp`` and ``src/corosio/event_loop.hpp``, and for the
 test fixtures in ``test/asio/`` and ``test/corosio/``.
+
+The runtime layer is `anyhttp <https://github.com/pgit/anyhttp>`__'s, as far as this library uses
+it: the same names, defined the same way, with what is not part of the interface in ``detail::``.
+It differs in two places, and says so where it does. ``detail::complete()`` on Asio passes a
+handler on to the executor it is associated with, where anyhttp's runs it on the one it is given;
+and ``detail::clear_on_cancel()`` is not in anyhttp, whose operations can each be cancelled on
+their own.
 
 The tests follow the same rule: what is about protocol behaviour is written once, in the coroutine
 spelling, and runs on either runtime. What is about one runtime only has a file of its own --

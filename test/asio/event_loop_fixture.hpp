@@ -64,7 +64,7 @@ protected:
       return ::run_until(context, std::move(done), limit);
    }
 
-   static c_ares_async::Endpoint endpoint(std::string_view address, unsigned short port)
+   static c_ares_async::TcpEndpoint endpoint(std::string_view address, unsigned short port)
    {
       return {boost::asio::ip::make_address(address), port};
    }

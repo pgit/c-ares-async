@@ -35,7 +35,7 @@ and there is one header to include, which has everything:
 A build tree is on one runtime or the other, which is decided when it is configured:
 ``-DC_ARES_ASYNC_API=ASIO``, the default, or ``COROSIO``. The difference to a program is that
 Corosio has no completion tokens, and that the types in the interface are those of the runtime.
-They have the same names on both, such as :cpp:type:`Task` and :cpp:type:`Endpoint`, and
+They have the same names on both, such as :cpp:type:`Task` and :cpp:type:`TcpEndpoint`, and
 :ref:`the table on the Corosio page <corosio-runtimes>` says what each name stands for.
 
 A first lookup
@@ -237,8 +237,9 @@ Cancellation
 On Asio
 ^^^^^^^
 
-Any type of cancellation will do. ``cancel_after()`` gives a lookup a deadline, and it takes a
-timer here:
+A cancellation of the terminal type does it, which is what ``cancel_after()`` and the awaitable
+operator ``||`` send. A partial or total cancellation alone is ignored. ``cancel_after()`` gives a
+lookup a deadline, and it takes a timer here:
 
 .. literalinclude:: snippets.cpp
    :language: cpp

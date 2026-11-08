@@ -243,7 +243,7 @@ TEST(Strand, ServesAContextThatRunsOnSeveralThreads)
 
 using Cancellation = Async;
 
-TEST_F(Cancellation, CompletesWithOperationAborted)
+TEST_F(Cancellation, CompletesAsCanceled)
 {
    server.set_silent(true);
 
@@ -261,7 +261,31 @@ TEST_F(Cancellation, CompletesWithOperationAborted)
    EXPECT_FALSE(result.has_value()) << "the handler has to wait for its turn here as well";
 
    ASSERT_TRUE(run_until([&] { return result.has_value(); }));
-   EXPECT_EQ(*result, error::operation_aborted);
+   EXPECT_EQ(*result, c_ares_async::errors::canceled);
+   EXPECT_EQ(*result, boost::system::errc::operation_canceled);
+}
+
+TEST_F(Cancellation, IsOnlyEverTerminal)
+{
+   //
+   // A partial or a total cancellation promises a state that a lookup has no way of keeping, so it
+   // is ignored, the way Asio asks of an operation that does not support it. What cancel_after
+   // and the awaitable operator || send has the terminal bit, which is the one that counts.
+   //
+   for (const auto type : {cancellation_type::partial, cancellation_type::total})
+   {
+      cancellation_signal signal;
+      std::optional<error_code> result;
+      resolver.async_resolve(
+         "www.example.test", "443",
+         bind_cancellation_slot(signal.slot(),
+                                [&](error_code ec, const results_type&) { result = ec; }));
+
+      signal.emit(type);
+
+      ASSERT_TRUE(run_until([&] { return result.has_value(); }));
+      EXPECT_FALSE(*result) << result->message();
+   }
 }
 
 TEST_F(Cancellation, CancelsAnHttpsLookup)
@@ -279,7 +303,7 @@ TEST_F(Cancellation, CancelsAnHttpsLookup)
    signal.emit(cancellation_type::terminal);
 
    ASSERT_TRUE(run_until([&] { return result.has_value(); }));
-   EXPECT_EQ(*result, error::operation_aborted);
+   EXPECT_EQ(*result, c_ares_async::errors::canceled);
 }
 
 TEST_F(Cancellation, TakesEveryPendingOperationWithIt)
@@ -303,8 +327,8 @@ TEST_F(Cancellation, TakesEveryPendingOperationWithIt)
    signal.emit(cancellation_type::terminal);
 
    ASSERT_TRUE(run_until([&] { return cancelled && bystander; }));
-   EXPECT_EQ(*cancelled, error::operation_aborted);
-   EXPECT_EQ(*bystander, error::operation_aborted);
+   EXPECT_EQ(*cancelled, c_ares_async::errors::canceled);
+   EXPECT_EQ(*bystander, c_ares_async::errors::canceled);
 }
 
 TEST_F(Cancellation, LeavesTheResolverInWorkingOrder)
@@ -414,8 +438,8 @@ TEST_F(Lifetime, CompletesWhatIsPendingWhenTheResolverGoes)
    EXPECT_FALSE(result.has_value()) << "not from inside the destructor";
 
    ASSERT_TRUE(run_until([&] { return result && https_result; }));
-   EXPECT_EQ(*result, error::operation_aborted);
-   EXPECT_EQ(*https_result, error::operation_aborted);
+   EXPECT_EQ(*result, c_ares_async::errors::canceled);
+   EXPECT_EQ(*https_result, c_ares_async::errors::canceled);
 }
 
 TEST_F(Lifetime, LeavesNothingBehindInTheContext)
@@ -439,7 +463,7 @@ TEST_F(Lifetime, LeavesNothingBehindInTheContext)
    }
 
    ASSERT_TRUE(::run_until(other, [&] { return result.has_value(); }));
-   EXPECT_EQ(*result, error::operation_aborted);
+   EXPECT_EQ(*result, c_ares_async::errors::canceled);
 }
 
 TEST_F(Lifetime, IgnoresATimeoutThatWasAlreadyDueWhenTheResolverWent)
@@ -471,7 +495,7 @@ TEST_F(Lifetime, IgnoresATimeoutThatWasAlreadyDueWhenTheResolverWent)
    std::this_thread::sleep_for(std::chrono::milliseconds(1300));
 
    ASSERT_TRUE(run_until([&] { return result.has_value(); }));
-   EXPECT_EQ(*result, error::operation_aborted);
+   EXPECT_EQ(*result, c_ares_async::errors::canceled);
    EXPECT_EQ(doomed, nullptr);
 
    context.poll(); // whatever else was on its way

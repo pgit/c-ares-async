@@ -30,7 +30,7 @@ c_ares_async::Task<void> lookup(c_ares_async::Executor executor, std::string hos
    // Corosio has no output operator for an endpoint, so here is one: the address, in brackets
    // where it is an IPv6 one, and the port behind it.
    //
-   const auto text = [](const c_ares_async::Endpoint& endpoint) {
+   const auto text = [](const c_ares_async::TcpEndpoint& endpoint) {
       return endpoint.address().is_v6()
                 ? std::format("[{}]:{}", endpoint.address().to_string(), endpoint.port())
                 : std::format("{}:{}", endpoint.address().to_string(), endpoint.port());

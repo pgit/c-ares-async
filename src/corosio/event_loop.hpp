@@ -10,11 +10,7 @@
 #include <c_ares_async/runtime.hpp>
 
 #include <boost/capy/cond.hpp>
-#include <boost/capy/continuation.hpp>
-#include <boost/capy/ex/await_context.hpp>
 #include <boost/capy/ex/run_async.hpp>
-#include <boost/capy/ex/this_coro.hpp>
-#include <boost/corosio/delay.hpp>
 #include <boost/corosio/endpoint.hpp>
 #include <boost/corosio/ip_address.hpp>
 #include <boost/corosio/ipv4_address.hpp>
@@ -27,10 +23,8 @@
 #include <sys/socket.h>
 
 #include <array>
-#include <chrono>
-#include <coroutine>
 #include <cstring>
-#include <functional>
+#include <exception>
 #include <memory>
 #include <optional>
 #include <stop_token>
@@ -41,38 +35,6 @@
 
 namespace c_ares_async::detail
 {
-
-//
-// Starts 'task' on 'executor', detached, with 'token' to stop it: nobody waits for it, and what
-// it throws is dropped. Corosio has no co_spawn(), and this is what Capy starts a task with.
-//
-inline void launch(const Executor& executor, std::stop_token token, Task<void> task)
-{
-   boost::capy::run_async(
-      executor, std::move(token), []() noexcept {},
-      [](std::exception_ptr) noexcept {})(std::move(task));
-}
-
-//
-// Lets whatever else is ready to run on the caller's executor run first. Capy starts a task by
-// dispatching it, which runs it inline where the caller is on its executor already -- so this is
-// what a task awaits to be sure it is not on the stack of whoever launched it.
-//
-struct yield_now
-{
-   boost::capy::continuation continuation;
-
-   bool await_ready() const noexcept { return false; }
-   std::coroutine_handle<> await_suspend(std::coroutine_handle<> h,
-                                         const boost::capy::await_context* env)
-   {
-      continuation.h = h;
-      continuation.owner = env->owner;
-      env->executor.post(continuation);
-      return std::noop_coroutine();
-   }
-   void await_resume() const noexcept {}
-};
 
 enum class wait_type
 {
@@ -96,7 +58,7 @@ public:
       int type = 0;
       socklen_t length = sizeof(type);
       if (::getsockopt(fd, SOL_SOCKET, SO_TYPE, &type, &length) != 0)
-         throw system_error(make_system_error(errno), "getsockopt(SO_TYPE)");
+         throw system_error(last_error(), "getsockopt(SO_TYPE)");
 
       auto impl = std::make_shared<state>();
       const auto ec =
@@ -151,12 +113,14 @@ public:
    template <typename F>
    void wait(wait_type type, F&& on_ready)
    {
-      launch(
-         executor_, impl_->stop.get_token(),
-         [](std::shared_ptr<state> impl, wait_type type, std::decay_t<F> on_ready) -> Task<void> {
-            co_await yield_now();
-            on_ready(co_await impl->wait(type));
-         }(impl_, type, std::forward<F>(on_ready)));
+      auto wait = [](std::shared_ptr<state> impl, wait_type type,
+                     std::decay_t<F> on_ready) -> Task<void> {
+         co_await yield_now();
+         on_ready(co_await impl->wait(type));
+      };
+      boost::capy::run_async(
+         executor_, impl_->stop.get_token(), []() noexcept {},
+         [](const std::exception_ptr&) noexcept {})(wait(impl_, type, std::forward<F>(on_ready)));
    }
 
 private:
@@ -200,50 +164,6 @@ private:
    std::shared_ptr<state> impl_;
 };
 
-//
-// Corosio has a re-armable timer in its detail namespace only; what it offers is a delay, so
-// every arm() is a task of its own that the next arm() or cancel() stops.
-//
-// A delay that has expired may still be queued behind the executor when it is stopped, so the
-// task looks at its stop token again once it has resumed: a callback that has been replaced or
-// cancelled is never called.
-//
-class Timer
-{
-public:
-   explicit Timer(const Executor& executor) : executor_(executor) {}
-   ~Timer() { cancel(); }
-
-   Timer(const Timer&) = delete;
-   Timer& operator=(const Timer&) = delete;
-
-   template <typename F>
-   void arm(std::chrono::steady_clock::duration delay, F&& on_expiry)
-   {
-      cancel();
-      stop_.emplace();
-      launch(executor_, stop_->get_token(),
-             [](std::chrono::steady_clock::duration delay,
-                std::function<void()> on_expiry) -> Task<void> {
-                auto [ec] = co_await boost::corosio::delay(delay);
-                if (!ec && !(co_await boost::capy::this_coro::stop_token).stop_requested())
-                   on_expiry();
-             }(delay, std::function<void()>(std::forward<F>(on_expiry))));
-   }
-
-   void cancel()
-   {
-      if (stop_)
-         stop_->request_stop();
-
-      stop_.reset();
-   }
-
-private:
-   Executor executor_;
-   std::optional<std::stop_source> stop_;
-};
-
 inline std::string address_text(const std::array<unsigned char, 4>& bytes)
 {
    return boost::corosio::ipv4_address(bytes).to_string();
@@ -254,7 +174,7 @@ inline std::string address_text(const std::array<unsigned char, 16>& bytes)
    return boost::corosio::ipv6_address(bytes).to_string();
 }
 
-inline std::optional<Endpoint> make_endpoint(const sockaddr* address, std::size_t length)
+inline std::optional<TcpEndpoint> make_endpoint(const sockaddr* address, std::size_t length)
 {
    if (address->sa_family == AF_INET && length >= sizeof(sockaddr_in))
    {
@@ -263,7 +183,7 @@ inline std::optional<Endpoint> make_endpoint(const sockaddr* address, std::size_
 
       boost::corosio::ipv4_address::bytes_type bytes;
       std::memcpy(bytes.data(), &sa.sin_addr, bytes.size());
-      return Endpoint(boost::corosio::ipv4_address(bytes), ntohs(sa.sin_port));
+      return TcpEndpoint(boost::corosio::ipv4_address(bytes), ntohs(sa.sin_port));
    }
 
    if (address->sa_family == AF_INET6 && length >= sizeof(sockaddr_in6))
@@ -273,7 +193,8 @@ inline std::optional<Endpoint> make_endpoint(const sockaddr* address, std::size_
 
       boost::corosio::ipv6_address::bytes_type bytes;
       std::memcpy(bytes.data(), &sa.sin6_addr, bytes.size());
-      return Endpoint(boost::corosio::ipv6_address(bytes, sa.sin6_scope_id), ntohs(sa.sin6_port));
+      return TcpEndpoint(boost::corosio::ipv6_address(bytes, sa.sin6_scope_id),
+                         ntohs(sa.sin6_port));
    }
 
    return std::nullopt;

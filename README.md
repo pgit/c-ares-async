@@ -193,8 +193,8 @@ source tree -- which is what keeps the two CMake snippets above true.
 
 * **Cancelling one lookup cancels all of them.** c-ares has no handle for a single request, so
   what a cancellation can do is `ares_cancel()`, for the whole resolver. Every pending operation
-  then completes with `c_ares_async::errors::canceled` -- `operation_aborted` on Asio,
-  `capy::error::canceled` on Corosio.
+  then completes with `c_ares_async::errors::canceled`, which compares equal to
+  `errc::operation_canceled` on either runtime. On Asio, only a terminal cancellation counts.
 * **A resolver is for one thread at a time.** Where the `io_context` runs on several, make its
   executor a strand and start the lookups from inside it.
 * **A lookup is not complete until the context ran its handler**, including where a resolver is

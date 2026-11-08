@@ -159,10 +159,10 @@ using log_function = std::function<void(log_level, std::string_view)>;
     @par The two runtimes
     Both lookups come as a coroutine, @ref resolve and @ref resolve_https,
     which is the spelling that an `C_ARES_ASYNC_ASIO` and an
-    `C_ARES_ASYNC_COROSIO` build have in common: it yields the error and the
-    result as a tuple. On Asio there is also @ref async_resolve and
-    @ref async_resolve_https, which take any completion token. See
-    `doc/corosio.rst`.
+    `C_ARES_ASYNC_COROSIO` build have in common: an @ref IoTask, which
+    yields the error and the result as a tuple. On Asio there is also
+    @ref async_resolve and @ref async_resolve_https, which take any
+    completion token. See `doc/corosio.rst`.
 
     @par Thread safety
     Distinct objects: safe. Shared objects: unsafe. Where the context runs on
@@ -170,11 +170,13 @@ using log_function = std::function<void(log_level, std::string_view)>;
     the resolver from inside that strand.
 
     @par Cancellation
-    Both operations can be cancelled -- by any type of cancellation on
-    Asio, by the `std::stop_token` of the awaiting coroutine on
-    Corosio -- and then complete with @ref errors::canceled. But c-ares has
-    no handle for a single request, so cancelling one operation cancels
-    every operation that is pending on the resolver.
+    Both operations can be cancelled -- by a cancellation of the terminal
+    type on Asio, which is what `cancel_after` and `||` send, by the
+    `std::stop_token` of the awaiting coroutine on Corosio -- and then
+    complete with @ref errors::canceled. Partial and total cancellation
+    alone are ignored. But c-ares has no handle for a single request, so
+    cancelling one operation cancels every operation that is pending on
+    the resolver.
 
     @par Lifetime
     Destroying the resolver completes what is pending with
@@ -217,7 +219,7 @@ public:
    /** What @ref resolve comes back with: the endpoints of the host, best
        first.
     */
-   using results_type = std::vector<Endpoint>;
+   using results_type = std::vector<TcpEndpoint>;
 
    /** The completion signature of @ref resolve. */
    using resolve_signature = void(error_code, results_type);
@@ -326,7 +328,7 @@ public:
 
        @return The error and the endpoints.
     */
-   Task<std::tuple<error_code, results_type>> resolve(std::string host, std::string service);
+   IoTask<results_type> resolve(std::string host, std::string service);
 
    /** Resolves the HTTPS records (RFC 9460) of a host name.
 
@@ -342,7 +344,7 @@ public:
 
        @return The error and the records.
     */
-   Task<std::tuple<error_code, https_results_type>> resolve_https(std::string host);
+   IoTask<https_results_type> resolve_https(std::string host);
 
 #if C_ARES_ASYNC_ASIO
 

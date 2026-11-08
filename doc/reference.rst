@@ -66,14 +66,16 @@ are something else, which :ref:`the table in the Corosio page <corosio-runtimes>
 
 .. doxygentypedef:: c_ares_async::IpAddress
 
-.. doxygentypedef:: c_ares_async::Endpoint
+.. doxygentypedef:: c_ares_async::TcpEndpoint
 
 .. doxygentypedef:: c_ares_async::error_code
+
+.. doxygentypedef:: c_ares_async::results
+
+.. doxygentypedef:: c_ares_async::IoTask
 
 .. doxygentypedef:: c_ares_async::error_category
 
 .. doxygentypedef:: c_ares_async::system_error
 
 .. doxygenvariable:: c_ares_async::errors::canceled
-
-.. doxygenfunction:: c_ares_async::make_system_error

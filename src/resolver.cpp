@@ -257,7 +257,7 @@ void https_callback(void* arg, ares_status_t status, size_t timeouts,
       }
    }
 
-   detail::complete_later(std::move(request->handler), request->executor, ec, std::move(records));
+   detail::complete(std::move(request->handler), request->executor, ec, std::move(records));
 }
 
 void addrinfo_callback(void* arg, int status, int timeouts, ares_addrinfo* result)
@@ -267,8 +267,8 @@ void addrinfo_callback(void* arg, int status, int timeouts, ares_addrinfo* resul
                      timeouts);
 
    //
-   // Report the c-ares way of being cancelled as the runtime's own, so that the operation behaves
-   // like any other cancelled operation of it.
+   // Report the c-ares way of being cancelled as errors::canceled, which compares equal to
+   // errc::operation_canceled, as any other cancelled operation of the runtime does.
    //
    const auto ec = (status == ARES_ECANCELLED || status == ARES_EDESTRUCTION)
                       ? errors::canceled
@@ -291,7 +291,7 @@ void addrinfo_callback(void* arg, int status, int timeouts, ares_addrinfo* resul
    // synchronous completion -- complete later to stay clear of the "never invoke the handler
    // inline" rule.
    //
-   detail::complete_later(std::move(request->handler), request->executor, ec, std::move(endpoints));
+   detail::complete(std::move(request->handler), request->executor, ec, std::move(endpoints));
 }
 
 } // namespace
@@ -398,8 +398,7 @@ resolver::~resolver()
 // Asio initiate() is a deferred operation with the handler of a completion token behind it,
 // so neither runtime pays for a front end it does not use.
 //
-Task<std::tuple<error_code, resolver::results_type>> resolver::resolve(std::string host,
-                                                                       std::string service)
+IoTask<resolver::results_type> resolver::resolve(std::string host, std::string service)
 {
    co_return co_await detail::initiate<resolve_signature>(
       [&](detail::Completion<resolve_signature> handler) {
@@ -407,7 +406,7 @@ Task<std::tuple<error_code, resolver::results_type>> resolver::resolve(std::stri
       });
 }
 
-Task<std::tuple<error_code, resolver::https_results_type>> resolver::resolve_https(std::string host)
+IoTask<resolver::https_results_type> resolver::resolve_https(std::string host)
 {
    co_return co_await detail::initiate<https_signature>(
       [&](detail::Completion<https_signature> handler) {
@@ -484,8 +483,8 @@ void resolver::start_resolve_https(std::string host, detail::Completion<https_si
    detail::log_error(m_logger, "HTTPS query for {}: {}", host, ares_strerror(status));
    detail::clear_on_cancel(request->handler);
 
-   detail::complete_later(std::move(request->handler), m_executor, make_ares_error(status),
-                          https_results_type());
+   detail::complete(std::move(request->handler), m_executor, make_ares_error(status),
+                    https_results_type());
 }
 
 // --------------------------------------------------------------------------------------------------

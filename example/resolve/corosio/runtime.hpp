@@ -133,8 +133,8 @@ public:
    static constexpr std::string_view concurrency_note =
       "the Corosio resolver has as many lookups in flight as its thread pool has threads";
 
-   c_ares_async::Task<std::tuple<c_ares_async::error_code, c_ares_async::resolver::results_type>>
-   resolve(const std::string& host, const std::string& service)
+   c_ares_async::IoTask<c_ares_async::resolver::results_type> resolve(const std::string& host,
+                                                                      const std::string& service)
    {
       auto [ec, endpoints] = co_await resolver_.resolve(host, service);
       co_return std::tuple{ec, std::move(endpoints)};

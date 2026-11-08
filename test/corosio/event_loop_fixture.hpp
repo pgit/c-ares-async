@@ -118,7 +118,7 @@ protected:
       return true;
    }
 
-   static c_ares_async::Endpoint endpoint(std::string_view address, unsigned short port)
+   static c_ares_async::TcpEndpoint endpoint(std::string_view address, unsigned short port)
    {
       auto [ec, parsed] = boost::corosio::make_ip_address(address);
       if (ec)

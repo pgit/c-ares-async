@@ -48,10 +48,18 @@ Cancellation
 Cancellation works, but only bluntly: c-ares has no handle for an individual ``ares_getaddrinfo()``
 request, so cancelling one calls ``ares_cancel()``, which takes every pending query on the channel
 with it -- the lookups of every other name in flight included. Each of them completes with
-:cpp:var:`errors::canceled`, which is what ``ARES_ECANCELLED`` and ``ARES_EDESTRUCTION`` are reported as, and
-which is ``boost::asio::error::operation_aborted`` here and ``boost::capy::error::canceled`` on the
-other runtime. What does the cancelling is a cancellation slot on Asio and the
-``std::stop_token`` of the awaiting coroutine on Corosio.
+:cpp:var:`errors::canceled`, which is what ``ARES_ECANCELLED`` and ``ARES_EDESTRUCTION`` are
+reported as: ``errc::operation_canceled`` on Asio and ``boost::capy::error::canceled`` on Corosio,
+which both compare equal to ``errc::operation_canceled``. What does the cancelling is a
+cancellation of the terminal type on Asio, through a cancellation slot, and the
+``std::stop_token`` of the awaiting coroutine on Corosio. A partial or total cancellation alone
+promises a state that a lookup cannot keep, and is ignored, which is what Asio asks of an
+operation that does not support it.
+
+A cancellation that arrives once a lookup has completed, with its handler still on its way, would
+take the lookups that are still pending with it. So the completion takes the cancellation handler
+back first, with ``detail::clear_on_cancel()``, which anyhttp's runtime layer has no need for: its
+operations can each be cancelled on their own.
 
 That puts some weight on ``ares_cancel()``, which is worth knowing about:
 `GHSA-6wfj-rwm7-3542 <https://github.com/c-ares/c-ares/security/advisories/GHSA-6wfj-rwm7-3542>`__
