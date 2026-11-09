@@ -224,33 +224,33 @@ std::expected<Config, int> parseConfig(int argc, char* argv[])
    }
    catch (const po::error& ex)
    {
-      std::cerr << ex.what() << std::endl << desc;
+      std::cerr << ex.what() << '\n' << desc;
       return std::unexpected(EXIT_FAILURE);
    }
 
    if (vm.count("help"))
    {
-      std::cout << "Usage: resolve [options] <host>..." << std::endl
-                << "       resolve [options] --file <urls>" << std::endl
+      std::cout << "Usage: resolve [options] <host>...\n"
+                << "       resolve [options] --file <urls>\n"
                 << desc;
       return std::unexpected(EXIT_SUCCESS);
    }
 
    if (config.concurrency < 1)
    {
-      std::cerr << "--concurrency has to be at least 1" << std::endl << desc;
+      std::cerr << "--concurrency has to be at least 1\n" << desc;
       return std::unexpected(EXIT_FAILURE);
    }
 
    if (!config.file.empty() && !readHosts(config.file, config.hosts))
    {
-      std::cerr << "cannot read " << config.file << ": " << std::strerror(errno) << std::endl;
+      std::cerr << "cannot read " << config.file << ": " << std::strerror(errno) << '\n';
       return std::unexpected(EXIT_FAILURE);
    }
 
    if (config.hosts.empty())
    {
-      std::cerr << "no host given" << std::endl << desc;
+      std::cerr << "no host given\n" << desc;
       return std::unexpected(EXIT_FAILURE);
    }
 
@@ -259,7 +259,7 @@ std::expected<Config, int> parseConfig(int argc, char* argv[])
       if (config.native)
       {
          std::cerr << std::format("--dot is not supported by {}", app::native_resolver::name)
-                   << std::endl
+                   << '\n'
                    << desc;
          return std::unexpected(EXIT_FAILURE);
       }
@@ -283,7 +283,7 @@ std::expected<Config, int> parseConfig(int argc, char* argv[])
                                           "against: a host name as --server, or --tls-hostname"
                                         : "--server names several hosts, so --dot needs "
                                           "--tls-hostname to verify their certificates against")
-                      << ", or --tls-no-verify to skip the check" << std::endl
+                      << ", or --tls-no-verify to skip the check\n"
                       << desc;
             return std::unexpected(EXIT_FAILURE);
          }
@@ -291,7 +291,7 @@ std::expected<Config, int> parseConfig(int argc, char* argv[])
    }
    else if (!config.tls.hostname.empty() || !config.tls.verify)
    {
-      std::cerr << "--tls-hostname and --tls-no-verify only apply with --dot" << std::endl << desc;
+      std::cerr << "--tls-hostname and --tls-no-verify only apply with --dot\n" << desc;
       return std::unexpected(EXIT_FAILURE);
    }
 
