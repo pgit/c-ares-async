@@ -19,7 +19,7 @@
 #include <c_ares_async/runtime.hpp>
 
 #if C_ARES_ASYNC_COROSIO
-#include "corosio/event_loop.hpp"
+#include <c_ares_async/corosio/event_loop.hpp>
 #else
-#include "asio/event_loop.hpp"
+#include <c_ares_async/asio/event_loop.hpp>
 #endif

@@ -2,8 +2,8 @@
 // SPDX-License-Identifier: BSL-1.0
 
 //
-// The event loop of Corosio, see ../event_loop.hpp. asio/event_loop.hpp has the documentation of
-// each of these, and what is said here is what differs.
+// The event loop of Corosio, see ../detail/event_loop.hpp. asio/event_loop.hpp has the
+// documentation of each of these, and what is said here is what differs.
 //
 #pragma once
 
@@ -33,7 +33,7 @@
 #include <utility>
 #include <variant>
 
-namespace c_ares_async::detail
+namespace c_ares_async::inline corosio::detail
 {
 
 enum class wait_type
@@ -200,4 +200,4 @@ inline std::optional<TcpEndpoint> make_endpoint(const sockaddr* address, std::si
    return std::nullopt;
 }
 
-} // namespace c_ares_async::detail
+} // namespace c_ares_async::inline corosio::detail

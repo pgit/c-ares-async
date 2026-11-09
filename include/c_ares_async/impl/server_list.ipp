@@ -1,19 +1,18 @@
 // Copyright (c) 2026 Peter Eisenlohr
 // SPDX-License-Identifier: BSL-1.0
 
-#include "server_list.hpp"
+#pragma once
+
+#include <c_ares_async/detail/server_list.hpp> // NOLINT(misc-header-include-cycle)
 
 #include <algorithm>
 #include <format>
 #include <memory>
 
-namespace c_ares_async::detail
+namespace c_ares_async::inline C_ARES_ASYNC_RUNTIME::detail
 {
 
-namespace
-{
-
-std::string_view trim(std::string_view text)
+inline std::string_view trim(std::string_view text)
 {
    const auto first = text.find_first_not_of(" \t");
    if (first == std::string_view::npos)
@@ -27,7 +26,7 @@ std::string_view trim(std::string_view text)
 // and "192.0.2.1:853" is the only unbracketed form that can have one -- a bare IPv6 address has
 // several colons and no port at all.
 //
-bool has_port(std::string_view server)
+inline bool has_port(std::string_view server)
 {
    const auto colon = server.rfind(':');
    if (colon == std::string_view::npos || colon + 1 == server.size())
@@ -41,11 +40,9 @@ bool has_port(std::string_view server)
                               [](char c) { return c >= '0' && c <= '9'; });
 }
 
-} // namespace
-
 // --------------------------------------------------------------------------------------------------
 
-std::string with_port(std::string_view servers, unsigned port, bool force)
+inline std::string with_port(std::string_view servers, unsigned port, bool force)
 {
    std::string result;
 
@@ -83,7 +80,7 @@ std::string with_port(std::string_view servers, unsigned port, bool force)
    return result;
 }
 
-ares_status_t set_port(ares_channel_t* channel, unsigned port)
+inline ares_status_t set_port(ares_channel_t* channel, unsigned port)
 {
    const std::unique_ptr<char, decltype(&ares_free_string)> current(ares_get_servers_csv(channel),
                                                                     &ares_free_string);
@@ -97,4 +94,4 @@ ares_status_t set_port(ares_channel_t* channel, unsigned port)
    return static_cast<ares_status_t>(ares_set_servers_csv(channel, moved.c_str()));
 }
 
-} // namespace c_ares_async::detail
+} // namespace c_ares_async::inline C_ARES_ASYNC_RUNTIME::detail

@@ -38,6 +38,6 @@ Warnings are errors in both tools, so a public symbol without a comment, a param
 * Code in the guide comes from `snippets.cpp`, between a `// [name]` and a `// [name-end]` comment,
   and is shown with `literalinclude`. Only pseudo code is written in place.
 * In a page, names link to the reference with `` :cpp:func:`resolver::resolve` `` and the like, and
-  files of the repository with `` :src:`src/resolver.cpp` ``.
+  files of the repository with `` :src:`include/c_ares_async/resolver.hpp` ``.
 
 [`Doxyfile.in`](Doxyfile.in) configures Doxygen and [`conf.py`](conf.py) configures Sphinx.

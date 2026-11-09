@@ -33,7 +33,7 @@
 #include <tuple>
 #include <utility>
 
-namespace c_ares_async
+namespace c_ares_async::inline asio
 {
 
 /** A coroutine, as the runtime runs it: `boost::asio::awaitable<T>`. */
@@ -77,6 +77,24 @@ using IoTask = Task<results<Ts...>>;
     from.
  */
 using error_category = boost::system::error_category;
+
+namespace detail
+{
+
+//
+// The base of an error category of the library's own. The headers define it, so every shared
+// library that uses it has a copy of its one object -- and Boost.System takes two categories for
+// one where they have the same 'Id', which is a random number of 64 bits. Not in anyhttp, which is
+// compiled.
+//
+template <unsigned long long Id>
+class error_category_base : public error_category
+{
+protected:
+   constexpr error_category_base() noexcept : error_category(Id) {}
+};
+
+} // namespace detail
 
 // --------------------------------------------------------------------------------------------------
 
@@ -258,4 +276,4 @@ private:
 
 } // namespace detail
 
-} // namespace c_ares_async
+} // namespace c_ares_async::inline asio

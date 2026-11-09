@@ -1,8 +1,10 @@
 #
 # The library the way a consumer gets it: test/cmake_test is a project of its own that is
 # configured, built and run from scratch, once against an installed c_ares_async that it finds with
-# find_package() and once with the sources pulled in through add_subdirectory(). Neither sees
-# anything of this build but what a consumer would.
+# find_package() and once with the sources pulled in through add_subdirectory(), and on the runtime
+# of this build. Neither sees anything of this build but what a consumer would -- except, on
+# Corosio, the sources of Capy and Corosio that this build fetched, which the consumer builds as
+# its own instead of downloading them again.
 #
 set(cmake_test_source_dir "${CMAKE_CURRENT_SOURCE_DIR}/cmake_test")
 set(cmake_test_binary_dir "${CMAKE_CURRENT_BINARY_DIR}/cmake_test")
@@ -23,18 +25,25 @@ foreach (variable IN ITEMS
          CMAKE_SHARED_LINKER_FLAGS
          CMAKE_PREFIX_PATH
          CMAKE_TOOLCHAIN_FILE
-         BUILD_SHARED_LIBS
          C_ARES_ASYNC_TLS
          Boost_DIR
          c-ares_DIR
          OPENSSL_ROOT_DIR
          ssl_DIR
+         ssl_ROOT
          crypto_DIR)
     if (DEFINED ${variable})
         string(APPEND cmake_test_cache_content
                "set(${variable} [==[${${variable}}]==] CACHE STRING \"\")\n")
     endif()
 endforeach()
+string(APPEND cmake_test_cache_content
+       "set(C_ARES_ASYNC_RUNTIME ${c_ares_async_runtime} CACHE STRING \"\")\n")
+if (c_ares_async_runtime STREQUAL "corosio")
+    string(APPEND cmake_test_cache_content
+           "set(FETCHCONTENT_SOURCE_DIR_CAPY [==[${capy_SOURCE_DIR}]==] CACHE PATH \"\")\n"
+           "set(FETCHCONTENT_SOURCE_DIR_COROSIO [==[${corosio_SOURCE_DIR}]==] CACHE PATH \"\")\n")
+endif()
 file(GENERATE OUTPUT "${cmake_test_cache}" CONTENT "${cmake_test_cache_content}")
 
 add_test(NAME cmake_test.install

@@ -87,20 +87,19 @@
         },
         {
             "name": "openssl",
-            "displayName": "OpenSSL, shared",
-            "description": "The system's OpenSSL instead of AWS-LC, and the library as a shared one",
+            "displayName": "OpenSSL",
+            "description": "The system's OpenSSL instead of AWS-LC",
             "inherits": "devcontainer",
             "binaryDir": "${sourceDir}/build-openssl",
             "cacheVariables": {
                 "CMAKE_BUILD_TYPE": "Debug",
-                "C_ARES_ASYNC_TLS": "OpenSSL",
-                "BUILD_SHARED_LIBS": "ON"
+                "C_ARES_ASYNC_TLS": "OpenSSL"
             }
         },
         {
             "name": "corosio",
             "displayName": "Corosio",
-            "description": "The library on Corosio instead of Asio, in build-corosio/: coroutines only, and Capy and Corosio are fetched at the commits CMakeLists.txt pins",
+            "description": "The tests and examples on Corosio instead of Asio, in build-corosio/: coroutines only, and Capy and Corosio are fetched at the commits CMakeLists.txt pins",
             "inherits": [
                 "devcontainer",
                 "aws-lc"

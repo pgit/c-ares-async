@@ -2,7 +2,7 @@
 // SPDX-License-Identifier: BSL-1.0
 
 //
-// The event loop of Asio, see ../event_loop.hpp.
+// The event loop of Asio, see ../detail/event_loop.hpp.
 //
 #pragma once
 
@@ -19,7 +19,7 @@
 #include <string>
 #include <utility>
 
-namespace c_ares_async::detail
+namespace c_ares_async::inline asio::detail
 {
 
 //
@@ -119,4 +119,4 @@ inline std::optional<TcpEndpoint> make_endpoint(const sockaddr* address, std::si
    return std::nullopt;
 }
 
-} // namespace c_ares_async::detail
+} // namespace c_ares_async::inline asio::detail

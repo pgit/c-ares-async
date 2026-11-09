@@ -2,7 +2,7 @@
 # The code that the programmer's guide shows is part of every build, as that is what keeps it true.
 #
 add_library(c_ares_async_doc_snippets OBJECT snippets.cpp)
-target_link_libraries(c_ares_async_doc_snippets PRIVATE c_ares_async::c_ares_async)
+target_link_libraries(c_ares_async_doc_snippets PRIVATE c_ares_async::${c_ares_async_runtime})
 
 #
 # The 'docs' target: the guide and the reference, as HTML. Sphinx makes the pages, and Breathe gets

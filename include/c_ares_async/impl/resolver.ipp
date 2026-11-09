@@ -1,13 +1,14 @@
 // Copyright (c) 2026 Peter Eisenlohr
 // SPDX-License-Identifier: BSL-1.0
 
-#include <c_ares_async/resolver.hpp>
+#pragma once
 
-#include "event_loop.hpp"
-#include "log.hpp"
-#include "server_list.hpp"
-#include "socket_functions.hpp"
-#include "tls_transport.hpp"
+#include <c_ares_async/detail/event_loop.hpp>
+#include <c_ares_async/detail/log.hpp>
+#include <c_ares_async/detail/server_list.hpp>
+#include <c_ares_async/detail/socket_functions.hpp>
+#include <c_ares_async/detail/tls_transport.hpp>
+#include <c_ares_async/resolver.hpp> // NOLINT(misc-header-include-cycle)
 
 #include <netinet/in.h>
 #include <sys/socket.h>
@@ -22,26 +23,8 @@
 #include <tuple>
 #include <utility>
 
-namespace c_ares_async
+namespace c_ares_async::inline C_ARES_ASYNC_RUNTIME
 {
-
-// --------------------------------------------------------------------------------------------------
-
-const error_category& ares_category() noexcept
-{
-   static const struct Category : error_category
-   {
-      const char* name() const noexcept override { return "c-ares"; }
-      std::string message(int value) const override { return ares_strerror(value); }
-   } category;
-
-   return category;
-}
-
-error_code make_ares_error(int status) noexcept
-{
-   return {status, ares_category()}; // ARES_SUCCESS is 0, so this stays falsy on success
-}
 
 // --------------------------------------------------------------------------------------------------
 
@@ -69,7 +52,7 @@ struct resolver::socket_watch
 
 // --------------------------------------------------------------------------------------------------
 
-namespace
+namespace detail
 {
 
 //
@@ -96,8 +79,8 @@ struct https_request
 // Renders one SvcParam value. c-ares hands these over as opaque bytes and tells us, through
 // ares_dns_opt_get_datatype(), which of the RFC 9460 wire formats to read them as.
 //
-std::string to_text(unsigned short param, ares_dns_opt_datatype_t datatype,
-                    const unsigned char* value, size_t length)
+inline std::string to_text(unsigned short param, ares_dns_opt_datatype_t datatype,
+                           const unsigned char* value, size_t length)
 {
    switch (datatype)
    {
@@ -197,7 +180,7 @@ std::string to_text(unsigned short param, ares_dns_opt_datatype_t datatype,
 //
 // Renders SvcParam 'index' of 'rr' as "key" or "key=value".
 //
-std::string to_text(const ares_dns_rr_t* rr, size_t index)
+inline std::string to_text(const ares_dns_rr_t* rr, size_t index)
 {
    const unsigned char* value = nullptr;
    size_t length = 0;
@@ -216,8 +199,8 @@ std::string to_text(const ares_dns_rr_t* rr, size_t index)
    return text.empty() ? key : std::format("{}={}", key, text);
 }
 
-void https_callback(void* arg, ares_status_t status, size_t timeouts,
-                    const ares_dns_record_t* dnsrec)
+inline void https_callback(void* arg, ares_status_t status, size_t timeouts,
+                           const ares_dns_record_t* dnsrec)
 {
    std::unique_ptr<https_request> request(static_cast<https_request*>(arg));
    detail::log_debug(request->logger, "ares_search_dnsrec: {} ({} timeout(s))",
@@ -260,7 +243,7 @@ void https_callback(void* arg, ares_status_t status, size_t timeouts,
    detail::complete(std::move(request->handler), request->executor, ec, std::move(records));
 }
 
-void addrinfo_callback(void* arg, int status, int timeouts, ares_addrinfo* result)
+inline void addrinfo_callback(void* arg, int status, int timeouts, ares_addrinfo* result)
 {
    std::unique_ptr<resolve_request> request(static_cast<resolve_request*>(arg));
    detail::log_debug(request->logger, "ares_getaddrinfo: {} ({} timeout(s))", ares_strerror(status),
@@ -294,11 +277,11 @@ void addrinfo_callback(void* arg, int status, int timeouts, ares_addrinfo* resul
    detail::complete(std::move(request->handler), request->executor, ec, std::move(endpoints));
 }
 
-} // namespace
+} // namespace detail
 
 // --------------------------------------------------------------------------------------------------
 
-resolver::resolver(executor_type executor, const tls_options& tls)
+inline resolver::resolver(executor_type executor, const tls_options& tls)
    : m_executor(std::move(executor)), m_timer(std::make_unique<detail::Timer>(m_executor))
 {
    if (int status = ares_library_init(ARES_LIB_INIT_ALL); status != ARES_SUCCESS)
@@ -367,7 +350,7 @@ resolver::resolver(executor_type executor, const tls_options& tls)
    }
 }
 
-error_code resolver::set_servers(std::string_view servers)
+inline error_code resolver::set_servers(std::string_view servers)
 {
    //
    // For DNS over TLS the port to assume is 853, where the list does not name one. A port that
@@ -381,9 +364,9 @@ error_code resolver::set_servers(std::string_view servers)
    return make_ares_error(ares_set_servers_csv(m_channel, list.c_str()));
 }
 
-void resolver::set_logger(log_function logger) { m_logger = std::move(logger); }
+inline void resolver::set_logger(log_function logger) { m_logger = std::move(logger); }
 
-resolver::~resolver()
+inline resolver::~resolver()
 {
    ares_destroy(m_channel); // fails pending queries with ARES_EDESTRUCTION and closes all sockets
    m_sockets.clear();
@@ -398,7 +381,7 @@ resolver::~resolver()
 // Asio initiate() is a deferred operation with the handler of a completion token behind it,
 // so neither runtime pays for a front end it does not use.
 //
-IoTask<resolver::results_type> resolver::resolve(std::string host, std::string service)
+inline IoTask<resolver::results_type> resolver::resolve(std::string host, std::string service)
 {
    co_return co_await detail::initiate<resolve_signature>(
       [&](detail::Completion<resolve_signature> handler) {
@@ -406,7 +389,7 @@ IoTask<resolver::results_type> resolver::resolve(std::string host, std::string s
       });
 }
 
-IoTask<resolver::https_results_type> resolver::resolve_https(std::string host)
+inline IoTask<resolver::https_results_type> resolver::resolve_https(std::string host)
 {
    co_return co_await detail::initiate<https_signature>(
       [&](detail::Completion<https_signature> handler) {
@@ -416,8 +399,8 @@ IoTask<resolver::https_results_type> resolver::resolve_https(std::string host)
 
 // --------------------------------------------------------------------------------------------------
 
-void resolver::start_resolve(std::string host, std::string service,
-                             detail::Completion<resolve_signature> handler)
+inline void resolver::start_resolve(std::string host, std::string service,
+                                    detail::Completion<resolve_signature> handler)
 {
    //
    // There is no handle for an individual ares_getaddrinfo() request, so cancelling one takes the
@@ -426,7 +409,8 @@ void resolver::start_resolve(std::string host, std::string service,
    //
    detail::on_cancel(handler, [this] { ares_cancel(m_channel); });
 
-   auto request = std::make_unique<resolve_request>(m_executor, m_logger, std::move(handler));
+   auto request =
+      std::make_unique<detail::resolve_request>(m_executor, m_logger, std::move(handler));
 
    ares_addrinfo_hints hints{};
    hints.ai_family = AF_UNSPEC;
@@ -434,16 +418,17 @@ void resolver::start_resolve(std::string host, std::string service,
 
    detail::log_debug(m_logger, "ares_getaddrinfo({}, {})...", host, service);
    ares_getaddrinfo(m_channel, host.c_str(), service.empty() ? nullptr : service.c_str(), &hints,
-                    &addrinfo_callback, request.release());
+                    &detail::addrinfo_callback, request.release());
 
    update_timeout();
 }
 
-void resolver::start_resolve_https(std::string host, detail::Completion<https_signature> handler)
+inline void resolver::start_resolve_https(std::string host,
+                                          detail::Completion<https_signature> handler)
 {
    detail::on_cancel(handler, [this] { ares_cancel(m_channel); });
 
-   auto request = std::make_unique<https_request>(m_executor, m_logger, std::move(handler));
+   auto request = std::make_unique<detail::https_request>(m_executor, m_logger, std::move(handler));
 
    //
    // ares_search_dnsrec() wants the question as a record rather than as a name, so that it can
@@ -463,7 +448,7 @@ void resolver::start_resolve_https(std::string host, detail::Completion<https_si
       // The callback owns the request from here on, and may well have run and freed it before
       // this call returns -- ARES_EFORMERR is the one status that does not reach it.
       //
-      status = ares_search_dnsrec(m_channel, query, &https_callback, request.get());
+      status = ares_search_dnsrec(m_channel, query, &detail::https_callback, request.get());
       if (status != ARES_EFORMERR)
       {
          request.release();
@@ -489,12 +474,13 @@ void resolver::start_resolve_https(std::string host, detail::Completion<https_si
 
 // --------------------------------------------------------------------------------------------------
 
-void resolver::socket_state_callback(void* data, ares_socket_t fd, int readable, int writable)
+inline void resolver::socket_state_callback(void* data, ares_socket_t fd, int readable,
+                                            int writable)
 {
    static_cast<resolver*>(data)->on_socket_state(fd, readable != 0, writable != 0);
 }
 
-void resolver::on_socket_state(ares_socket_t fd, bool readable, bool writable)
+inline void resolver::on_socket_state(ares_socket_t fd, bool readable, bool writable)
 {
    detail::log_debug(m_logger, "socket state: fd={} readable={} writable={}", fd, readable,
                      writable);
@@ -538,7 +524,7 @@ void resolver::on_socket_state(ares_socket_t fd, bool readable, bool writable)
    arm(socket);
 }
 
-void resolver::arm(const std::shared_ptr<socket_watch>& socket)
+inline void resolver::arm(const std::shared_ptr<socket_watch>& socket)
 {
    if (!socket->descriptor.is_open())
       return;
@@ -583,8 +569,8 @@ void resolver::arm(const std::shared_ptr<socket_watch>& socket)
    }
 }
 
-void resolver::on_socket_event(const std::shared_ptr<socket_watch>& socket, unsigned int event,
-                               const error_code& ec)
+inline void resolver::on_socket_event(const std::shared_ptr<socket_watch>& socket,
+                                      unsigned int event, const error_code& ec)
 {
    (event == ARES_FD_EVENT_READ ? socket->waiting_read : socket->waiting_write) = false;
 
@@ -634,7 +620,7 @@ void resolver::on_socket_event(const std::shared_ptr<socket_watch>& socket, unsi
 
 // --------------------------------------------------------------------------------------------------
 
-void resolver::update_timeout()
+inline void resolver::update_timeout()
 {
    timeval tv{};
    if (ares_timeout(m_channel, nullptr, &tv) == nullptr)
@@ -659,4 +645,4 @@ void resolver::update_timeout()
    });
 }
 
-} // namespace c_ares_async
+} // namespace c_ares_async::inline C_ARES_ASYNC_RUNTIME

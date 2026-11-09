@@ -13,17 +13,17 @@
 #pragma once
 
 #include <c_ares_async/error.hpp>
-#include <c_ares_async/export.hpp>
+#include <c_ares_async/https_record.hpp>
+#include <c_ares_async/logging.hpp>
 #include <c_ares_async/runtime.hpp>
+#include <c_ares_async/tls_options.hpp>
 
 #include <ares.h>
 
-#include <functional>
 #include <map>
 #include <memory>
 #include <string>
 #include <string_view>
-#include <tuple>
 #include <vector>
 
 #if C_ARES_ASYNC_ASIO
@@ -31,121 +31,20 @@
 #endif
 
 /** Name resolution with c-ares, as asynchronous operations of the runtime
-    the library was built on.
+    of the translation unit: Asio or Corosio.
  */
-namespace c_ares_async
+namespace c_ares_async::inline C_ARES_ASYNC_RUNTIME
 {
 
 namespace detail
 {
-class Timer;
 class tls_transport;
 } // namespace detail
 
 // --------------------------------------------------------------------------------------------------
 
-/** One HTTPS resource record (RFC 9460).
-
-    The record that tells a client which protocols an endpoint speaks before
-    it connects. It comes in two forms: with a @ref priority of 0 it is an
-    alias, where @ref target names the host to go on with, and with any other
-    it describes a service, where @ref params says how to reach it.
-
-    @see resolver::resolve_https
- */
-struct https_record
-{
-   /** 0 for an alias. For a service, its place among the records of the
-       name: a client tries the lowest first.
-    */
-   unsigned short priority = 0;
-
-   /** The name to go on with. Empty, or ".", where that is the name the
-       record was found under.
-    */
-   std::string target;
-
-   /** The service parameters, in presentation form.
-
-       One string for each parameter, the way a zone file has it:
-       "alpn=h3,h2", "port=8443", "ipv4hint=192.0.2.1,192.0.2.2" -- or the
-       key alone for one that has no value, like "no-default-alpn". Every key
-       has a value syntax of its own and c-ares hands them over as opaque
-       bytes, so there is not much to be gained from carrying them around
-       any further apart.
-
-       A key that c-ares has no name for reads "key" and its number, and a
-       value it has no format for is given in hexadecimal, like that of
-       "ech".
-    */
-   std::vector<std::string> params;
-};
-
-/** Whether a @ref resolver uses DNS over TLS (RFC 7858), and how.
-
-    c-ares has no encrypted transport of its own. What the library does is
-    to put a TLS session under the TCP connections that c-ares opens, which
-    is all it takes to turn DNS over TCP into DNS over TLS.
- */
-struct tls_options
-{
-   /** Sends every query over TLS: no UDP, and no TCP in the clear either. */
-   bool enabled = false;
-
-   /** The name of the server, for SNI and for its certificate to be checked
-       against.
-
-       c-ares knows its servers by address and nothing else, so the name has
-       to come from here. Without one there is no SNI, and @ref verify still
-       checks that the certificate is one to trust but not whose it is --
-       which is no more than knowing that the server is somebody.
-    */
-   std::string hostname;
-
-   /** Whether the certificate of the server is verified, against the trust
-       store that the TLS library uses by default.
-
-       Without this any certificate is taken, and with it anybody who is in
-       a position to answer for the server. That is for testing.
-    */
-   bool verify = true;
-};
-
-/** How much a message from a @ref c_ares_async::resolver matters.
-
-    @see log_function
- */
-enum class log_level
-{
-   /** What is going on: queries, the sockets of c-ares, timeouts. */
-   debug,
-
-   /** What may be worth knowing: a TLS session and whom it is with. */
-   info,
-
-   /** What did not go as it should, but did go on. */
-   warning,
-
-   /** What went wrong, and why: the reason a TLS handshake failed is one
-       that only ever shows here.
-    */
-   error
-};
-
-/** Receives the messages of a @ref resolver.
-
-    The library does not write anywhere by itself. What it has to say goes
-    to a function like this one, with the level of the message and its text,
-    and is not even put together where there is none.
-
-    @see resolver::set_logger
- */
-using log_function = std::function<void(log_level, std::string_view)>;
-
-// --------------------------------------------------------------------------------------------------
-
 /** Resolves host names with c-ares, as asynchronous operations of the
-    runtime the library was built on.
+    runtime of the translation unit.
 
     A resolver has one c-ares channel and drives it from the executor it was
     given. There is no thread behind it and nothing blocks: c-ares says which
@@ -210,7 +109,7 @@ using log_function = std::function<void(log_level, std::string_view)>;
     }
     @endcode
  */
-class C_ARES_ASYNC_EXPORT resolver
+class resolver
 {
 public:
    /** The type of the executor that a resolver runs on. */
@@ -446,4 +345,6 @@ private:
    std::map<ares_socket_t, std::shared_ptr<socket_watch>> m_sockets;
 };
 
-} // namespace c_ares_async
+} // namespace c_ares_async::inline C_ARES_ASYNC_RUNTIME
+
+#include <c_ares_async/impl/resolver.ipp>

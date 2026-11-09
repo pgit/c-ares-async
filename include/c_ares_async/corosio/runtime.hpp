@@ -33,7 +33,7 @@
 #include <type_traits>
 #include <utility>
 
-namespace c_ares_async
+namespace c_ares_async::inline corosio
 {
 
 /** A coroutine, as the runtime runs it: `boost::capy::task<T>`. */
@@ -70,6 +70,23 @@ using IoTask = Task<results<Ts...>>;
     `std::error_category`, which @ref ares_category derives from.
  */
 using error_category = std::error_category;
+
+namespace detail
+{
+
+//
+// std::error_category has no id, it compares by address only. What makes the copies of a category
+// that the headers define one object is ares_category() being visible outside of its shared
+// library, so that the dynamic linker binds them all to the same.
+//
+template <unsigned long long>
+class error_category_base : public error_category
+{
+protected:
+   constexpr error_category_base() noexcept = default;
+};
+
+} // namespace detail
 
 // --------------------------------------------------------------------------------------------------
 
@@ -371,4 +388,4 @@ private:
 
 } // namespace detail
 
-} // namespace c_ares_async
+} // namespace c_ares_async::inline corosio

@@ -7,23 +7,27 @@
 //
 #pragma once
 
+#include <c_ares_async/runtime.hpp>
+
 #include <ares.h>
 
 #include <string>
 #include <string_view>
 
-namespace c_ares_async::detail
+namespace c_ares_async::inline C_ARES_ASYNC_RUNTIME::detail
 {
 
 //
 // Puts 'port' on every entry of a server list that has none, or on all of them when 'force' is
 // set. Entries in the dns:// URI form are left alone, c-ares knows what to do with those.
 //
-std::string with_port(std::string_view servers, unsigned port, bool force);
+inline std::string with_port(std::string_view servers, unsigned port, bool force);
 
 //
 // Moves every server of 'channel' to 'port', whichever one it was on.
 //
-ares_status_t set_port(ares_channel_t* channel, unsigned port);
+inline ares_status_t set_port(ares_channel_t* channel, unsigned port);
 
-} // namespace c_ares_async::detail
+} // namespace c_ares_async::inline C_ARES_ASYNC_RUNTIME::detail
+
+#include <c_ares_async/impl/server_list.ipp>

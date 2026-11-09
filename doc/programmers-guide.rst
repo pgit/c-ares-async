@@ -15,28 +15,30 @@ how it is all done rather than how it is used has a page of its own, starting wi
 Prerequisites
 -------------
 
-A C++20 compiler, c-ares 1.34 or later and Boost 1.88 or later. A build on Corosio needs no
-Boost, as Corosio and its dependency Capy are fetched along with the library. The README has
-:src:`the full list <README.md>`. Whichever way the library gets into the build, the target has the
-same name:
+A C++20 compiler, c-ares 1.34 or later, and the runtime: Boost 1.88 or later for Asio, or Capy and
+Corosio. The README has :src:`the full list <README.md>`. The library is headers, so there is
+nothing to build; the runtime is the one of the target a program links, which has the same name
+whichever way the library gets into the build:
 
 .. code-block:: cmake
 
    find_package(c_ares_async 0.1 REQUIRED)
 
-   target_link_libraries(app PRIVATE c_ares_async::c_ares_async)
+   target_link_libraries(app PRIVATE c_ares_async::asio)
 
-and there is one header to include, which has everything:
+``find_package(c_ares_async 0.1 REQUIRED COMPONENTS corosio)`` and ``c_ares_async::corosio`` are
+the same on Corosio. There is one header to include, which has everything:
 
 .. code-block:: cpp
 
    #include <c_ares_async.hpp>
 
-A build tree is on one runtime or the other, which is decided when it is configured:
-``-DC_ARES_ASYNC_API=ASIO``, the default, or ``COROSIO``. The difference to a program is that
-Corosio has no completion tokens, and that the types in the interface are those of the runtime.
-They have the same names on both, such as :cpp:type:`Task` and :cpp:type:`TcpEndpoint`, and
-:ref:`the table on the Corosio page <corosio-runtimes>` says what each name stands for.
+What the target does is define ``C_ARES_ASYNC_ASIO`` or ``C_ARES_ASYNC_COROSIO``, which the headers
+take the runtime from -- one translation unit at a time, so the two can be in one program. The
+difference to a program is that Corosio has no completion tokens, and that the types in the
+interface are those of the runtime. They have the same names on both, such as :cpp:type:`Task` and
+:cpp:type:`TcpEndpoint`, and :ref:`the table on the Corosio page <corosio-runtimes>` says what each
+name stands for.
 
 A first lookup
 --------------
@@ -373,7 +375,7 @@ them the way the runtime waits for anything, and c-ares is told when one of them
    on_lookup_done(status, result):
        post(executor, handler(make_ares_error(status), result))   // never from in here
 
-The real thing is in :src:`src/resolver.cpp`, and :doc:`design` has the reasons for it.
+The real thing is in :src:`include/c_ares_async/impl/resolver.ipp`, and :doc:`design` has the reasons for it.
 
 Examples
 --------

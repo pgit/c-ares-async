@@ -2,7 +2,7 @@
 // SPDX-License-Identifier: BSL-1.0
 
 //
-// The shortest program that resolves a name, on corosio: the addresses of a host, and then
+// The shortest program that resolves a name, on Corosio: the addresses of a host, and then
 // its HTTPS record, each awaited in a coroutine. ../asio/minimal.cpp is the same on Asio.
 //
 //    minimal [host]

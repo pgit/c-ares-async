@@ -2,7 +2,7 @@
 // SPDX-License-Identifier: BSL-1.0
 
 //
-// The event loop a test runs on, which is the one of the runtime the library was built on. See
+// The event loop a test runs on, which is the one of the runtime the tests are built on. See
 // asio/event_loop_fixture.hpp for what a fixture gives a test, and corosio/event_loop_fixture.hpp
 // for the same thing on the other runtime.
 //

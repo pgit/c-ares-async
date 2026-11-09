@@ -3,10 +3,23 @@
 The Corosio runtime, next to Asio
 =================================
 
-One source tree that builds either as it always did, on Asio with completion tokens, or on
-`Corosio <https://github.com/cppalliance/corosio>`__ with a coroutine-only API. Corosio has `Capy
-<https://github.com/cppalliance/capy>`__ as a dependency, which is where the task and executor types
-below come from. The choice is made at configure time:
+One set of headers that serves either runtime: Asio with completion tokens, or `Corosio
+<https://github.com/cppalliance/corosio>`__ on `Capy <https://github.com/cppalliance/capy>`__, with a
+coroutine-only API. Which one is up to the translation unit that includes them, through the target
+it links:
+
+.. code-block:: cmake
+
+   target_link_libraries(app PRIVATE c_ares_async::corosio)   # or c_ares_async::asio
+
+The target defines ``C_ARES_ASYNC_COROSIO=1`` or ``C_ARES_ASYNC_ASIO=1``, and the headers go by
+that; with neither, they are for Asio. Both can be in one program, as everything is in the inline
+namespace ``c_ares_async::asio`` or ``c_ares_async::corosio``: the definitions are compiled from the
+same headers, and without it the linker would keep one of each and use it for both. Nobody has to
+spell the inline namespace -- ``c_ares_async::resolver`` is the one of the runtime at hand.
+
+This repository's own tests and examples are built on one runtime per build tree, which is what
+``C_ARES_ASYNC_API`` chooses:
 
 .. code-block:: sh
 
@@ -14,10 +27,10 @@ below come from. The choice is made at configure time:
    cmake --build --preset corosio
    ctest --preset corosio
 
-``C_ARES_ASYNC_API`` is ``ASIO`` or ``COROSIO`` and nothing else is needed: Capy and Corosio are fetched
-at the commits :src:`CMakeLists.txt` pins and built as part of the build. A
-COROSIO build needs no Boost at all -- which is also why it has no install rules, see
-:ref:`Constraints <corosio-constraints>`.
+Capy and Corosio are fetched at the commits :src:`CMakeLists.txt` pins and built as part of the
+build, unless whoever brought c-ares-async in has made them available already. They are not
+installed along with the headers: a program that uses the installed package on Corosio brings
+them itself, see :ref:`Constraints <corosio-constraints>`.
 
 .. _corosio-runtimes:
 
@@ -75,13 +88,13 @@ Where the code is
 -----------------
 
 Only three places know which runtime they are in, and they are the ones that say ``C_ARES_ASYNC_ASIO``
-or ``C_ARES_ASYNC_COROSIO`` (exactly one of which is 1, from the generated ``c_ares_async/config.hpp``):
+or ``C_ARES_ASYNC_COROSIO`` (exactly one of which is 1, see :src:`include/c_ares_async/runtime.hpp`):
 
 .. list-table::
 
    * - :src:`include/c_ares_async/runtime.hpp`
-     - the vocabulary of the interface, which picks ``asio/runtime.hpp`` or ``corosio/runtime.hpp``
-   * - :src:`src/event_loop.hpp`
+     - the vocabulary of the interface, which picks ``asio/runtime.hpp`` or ``corosio/runtime.hpp``, and the name of the inline namespace, ``C_ARES_ASYNC_RUNTIME``
+   * - :src:`include/c_ares_async/detail/event_loop.hpp`
      - the event loop the implementation drives: ``Descriptor`` and ``make_endpoint()``, again one file per runtime; the ``Timer`` is the runtime layer's
    * - :src:`include/c_ares_async/resolver.hpp`
      - the front end: the completion-token operations are ASIO-only
@@ -97,8 +110,9 @@ has a version per runtime instead: :src:`example/asio/minimal.cpp` and
 Everything else -- the lookups, the HTTPS records, the server lists, the DNS over TLS transport --
 is written once, against those names. ``asio/runtime.hpp`` documents each of them and
 ``corosio/runtime.hpp`` has the same definitions in the same order, so the pair can be read side by
-side; the same goes for ``src/asio/event_loop.hpp`` and ``src/corosio/event_loop.hpp``, and for the
-test fixtures in ``test/asio/`` and ``test/corosio/``.
+side; the same goes for ``asio/event_loop.hpp`` and ``corosio/event_loop.hpp``, and for the test
+fixtures in ``test/asio/`` and ``test/corosio/``. What is written once is in the inline namespace of
+whichever runtime it is compiled for, as ``namespace c_ares_async::inline C_ARES_ASYNC_RUNTIME``.
 
 The runtime layer is `anyhttp <https://github.com/pgit/anyhttp>`__'s, as far as this library uses
 it: the same names, defined the same way, with what is not part of the interface in ``detail::``.
@@ -111,7 +125,9 @@ The tests follow the same rule: what is about protocol behaviour is written once
 spelling, and runs on either runtime. What is about one runtime only has a file of its own --
 :src:`test/asio/async_test.cpp` for completion tokens, associated
 executors, cancellation slots and strands, :src:`test/corosio/stop_test.cpp`
-for stop tokens and ``corosio::timeout()``.
+for stop tokens and ``corosio::timeout()``. A COROSIO build has both runtimes, which
+:src:`test/corosio/mixed_runtimes_test.cpp` puts into one program: a lookup compiled with
+``c_ares_async::asio`` next to one compiled with ``c_ares_async::corosio``.
 
 The fake DNS server stays on Asio in both: it serves UDP, TCP and TLS, and a second
 implementation of it would only be a second thing to keep right. The COROSIO fixture steps its
@@ -135,7 +151,7 @@ anything, so what Asio gets to one turn of the event loop later happens here rig
   ``ares_set_socket_functions_ex()`` documents to mean "the connect has finished" -- and an event
   loop that answers "is this socket writable" cannot tell the two apart. Told so anyway, c-ares
   writes the query a second time and drops the connection, which costs a lookup every retry it
-  has. :src:`src/socket_functions.hpp` turns fast open down, as the TLS
+  has. :src:`include/c_ares_async/detail/socket_functions.hpp` turns fast open down, as the TLS
   transport already did.
 * **SO_ERROR is consume-on-read.** Corosio's reactor reads it to report the error of a socket as
   the error of the wait, which left the TLS transport's connect check with a zero and a handshake
@@ -174,10 +190,15 @@ Constraints
   ``std::unique_ptr`` works, and so does holding the resolver by value. To be filed upstream.
 * **Corosio has no output operator for an endpoint.** ``endpoint.address()`` and ``endpoint.port()``
   are there to be printed; the tests teach GoogleTest the same (``PrintTo``).
-* **No install rules.** Capy and Corosio are built from pinned sources here and not installed, so
-  an exported target would point at libraries that are not there. ``C_ARES_ASYNC_INSTALL`` is off by
-  default in a COROSIO build and refuses to be turned on, which also means the two CMake
-  consumer tests are ASIO-only.
+* **The installed package does not bring Corosio.** Capy and Corosio are built from pinned sources
+  here and not installed, and have no package of their own yet. ``find_package(c_ares_async
+  COMPONENTS corosio)`` makes ``c_ares_async::corosio`` where the targets ``Boost::corosio`` and
+  ``Boost::capy`` are there already, from a build of Corosio that is part of the program's, and
+  fails where they are not. The CMake consumer tests of a COROSIO build do it that way, with the
+  sources this build fetched.
+* **Capy and Corosio are position-independent code here.** The headers may be compiled into a
+  shared library, and Capy and Corosio then go in there with them; the tests make one. A build that
+  brings its own Capy and Corosio has to see to that itself.
 
 Not done yet
 ------------
