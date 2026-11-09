@@ -27,7 +27,7 @@ int main()
    context.run();
 
    std::cout << "c_ares_async " << C_ARES_ASYNC_VERSION_STRING << ": "
-             << (resolved ? "resolved" : "FAILED") << std::endl;
+             << (resolved ? "resolved" : "FAILED") << '\n';
 
    return resolved ? EXIT_SUCCESS : EXIT_FAILURE;
 }
