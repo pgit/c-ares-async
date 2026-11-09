@@ -4,7 +4,9 @@ API reference
 Made from the comments in the public headers. :doc:`programmers-guide` is the place to start, and
 says how these go together.
 
-Everything is in the namespace ``c_ares_async``, and everything comes with one include:
+Everything is in the namespace ``c_ares_async`` -- what depends on the runtime in the inline
+namespace ``c_ares_async::asio`` or ``c_ares_async::corosio``, which nobody has to spell -- and
+everything comes with one include:
 
 .. code-block:: cpp
 
@@ -23,17 +25,29 @@ Resolver
 HTTPS records
 -------------
 
+.. code-block:: cpp
+
+   #include <c_ares_async/https_record.hpp>
+
 .. doxygenstruct:: c_ares_async::https_record
    :members:
 
 DNS over TLS
 ------------
 
+.. code-block:: cpp
+
+   #include <c_ares_async/tls_options.hpp>
+
 .. doxygenstruct:: c_ares_async::tls_options
    :members:
 
 Logging
 -------
+
+.. code-block:: cpp
+
+   #include <c_ares_async/logging.hpp>
 
 .. doxygenenum:: c_ares_async::log_level
 
@@ -66,14 +80,16 @@ are something else, which :ref:`the table in the Corosio page <corosio-runtimes>
 
 .. doxygentypedef:: c_ares_async::IpAddress
 
-.. doxygentypedef:: c_ares_async::Endpoint
+.. doxygentypedef:: c_ares_async::TcpEndpoint
 
 .. doxygentypedef:: c_ares_async::error_code
+
+.. doxygentypedef:: c_ares_async::results
+
+.. doxygentypedef:: c_ares_async::IoTask
 
 .. doxygentypedef:: c_ares_async::error_category
 
 .. doxygentypedef:: c_ares_async::system_error
 
 .. doxygenvariable:: c_ares_async::errors::canceled
-
-.. doxygenfunction:: c_ares_async::make_system_error

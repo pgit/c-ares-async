@@ -4,7 +4,7 @@ A command line for the library, and the place where it gets tried out.
 
 `resolve` looks up the host names given on the command line, or those of the URLs listed in a
 file, several at a time. By default it uses c-ares, driven by the event loop of the runtime the
-library was built on; with `--native` it uses the resolver of that runtime instead -- Asio's
+program is built on; with `--native` it uses the resolver of that runtime instead -- Asio's
 `ip::tcp::resolver` or Corosio's `resolver`, both of which run `getaddrinfo()` on a thread of
 their own. Both should print the same addresses -- only the c-ares path also looks up the HTTPS
 record, since `getaddrinfo()` answers with addresses and nothing else.

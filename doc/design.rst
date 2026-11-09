@@ -4,18 +4,18 @@ How the integration works
 =========================
 
 c-ares is told about nothing but its own sockets, and is driven entirely from the event loop of
-the application. :src:`src/resolver.cpp` holds all of it:
+the application. :src:`include/c_ares_async/impl/resolver.ipp` holds all of it:
 
 * the channel is created with ``ARES_OPT_SOCK_STATE_CB``, so c-ares reports every socket it opens,
   closes, or changes its read/write interest on -- no c-ares event thread is involved;
-* each such socket gets a non-owning ``detail::Descriptor`` (``src/event_loop.hpp``), which waits for
+* each such socket gets a non-owning ``detail::Descriptor`` (``detail/event_loop.hpp``), which waits for
   readiness on it and is detached again before c-ares closes the socket. On Asio that is a
   ``posix::stream_descriptor`` and ``async_wait()``; the other runtime is in :doc:`the Corosio page <corosio>`;
 * readiness is fed back with `ares_process_fds() <https://c-ares.org/docs/ares_process_fds.html>`__.
   Since the socket state callback only fires on *changes*, the waits are re-armed after every call;
 * ``ares_timeout()`` drives a ``detail::Timer``, whose expiry calls ``ares_process_fds()`` with no
   events;
-* the socket functions of the channel are our own (:src:`src/socket_functions.hpp`),
+* the socket functions of the channel are our own (:src:`include/c_ares_async/detail/socket_functions.hpp`),
   for one reason: they turn TCP fast open down. Fast open makes a socket writable before its
   connection is up, and the write event is what c-ares takes for the connect having finished --
   told otherwise, it writes the query a second time and drops the connection. DNS over TLS
@@ -48,10 +48,18 @@ Cancellation
 Cancellation works, but only bluntly: c-ares has no handle for an individual ``ares_getaddrinfo()``
 request, so cancelling one calls ``ares_cancel()``, which takes every pending query on the channel
 with it -- the lookups of every other name in flight included. Each of them completes with
-:cpp:var:`errors::canceled`, which is what ``ARES_ECANCELLED`` and ``ARES_EDESTRUCTION`` are reported as, and
-which is ``boost::asio::error::operation_aborted`` here and ``boost::capy::error::canceled`` on the
-other runtime. What does the cancelling is a cancellation slot on Asio and the
-``std::stop_token`` of the awaiting coroutine on Corosio.
+:cpp:var:`errors::canceled`, which is what ``ARES_ECANCELLED`` and ``ARES_EDESTRUCTION`` are
+reported as: ``errc::operation_canceled`` on Asio and ``boost::capy::error::canceled`` on Corosio,
+which both compare equal to ``errc::operation_canceled``. What does the cancelling is a
+cancellation of the terminal type on Asio, through a cancellation slot, and the
+``std::stop_token`` of the awaiting coroutine on Corosio. A partial or total cancellation alone
+promises a state that a lookup cannot keep, and is ignored, which is what Asio asks of an
+operation that does not support it.
+
+A cancellation that arrives once a lookup has completed, with its handler still on its way, would
+take the lookups that are still pending with it. So the completion takes the cancellation handler
+back first, with ``detail::clear_on_cancel()``, which anyhttp's runtime layer has no need for: its
+operations can each be cancelled on their own.
 
 That puts some weight on ``ares_cancel()``, which is worth knowing about:
 `GHSA-6wfj-rwm7-3542 <https://github.com/c-ares/c-ares/security/advisories/GHSA-6wfj-rwm7-3542>`__
@@ -81,6 +89,40 @@ Logging
 The library writes nowhere. What it has to say -- the queries it starts and how they end, the
 sockets c-ares opens, what a TLS handshake negotiated or why it failed -- goes to the function
 given to :cpp:func:`resolver::set_logger`, and is not even formatted where there is none.
+
+Headers only
+------------
+
+There is nothing to build: every translation unit that includes :src:`include/c_ares_async/resolver.hpp`
+compiles the resolver, for the runtime that it is on. The declarations are where they always were,
+and the definitions follow them in ``impl/*.ipp``, which each header includes at its end -- the way
+Asio has it -- so the headers read the same as before, and each one compiles on its own, which a
+test makes sure of.
+
+Three things come with that.
+
+* **The runtime is chosen per translation unit.** The headers go by ``C_ARES_ASYNC_ASIO`` or
+  ``C_ARES_ASYNC_COROSIO``, which the targets ``c_ares_async::asio`` and ``c_ares_async::corosio``
+  define, so one program can have both. Everything is in an inline namespace of the runtime's name
+  for that reason: without it, ``resolver::~resolver()`` or ``resolver::set_logger()`` would be the
+  same symbol on either runtime, with a different resolver behind it, and the linker would keep
+  one of them for both. :src:`test/corosio/mixed_runtimes_test.cpp` puts both into one program.
+  What is the same on either runtime -- :cpp:struct:`https_record`, :cpp:struct:`tls_options`, the
+  logging types -- is in ``c_ares_async`` itself, in headers of its own.
+* **The category of the c-ares codes is one object, although every shared library has a copy.**
+  ``ares_category()`` is an inline function with a static object in it, which a shared library
+  compiled with ``-fvisibility=hidden`` would keep to itself -- and then a code it makes compares
+  unequal to the same code made elsewhere. The function is declared visible, so the dynamic linker
+  binds every copy to the same one, and on Asio the category has an id besides, which is what
+  Boost.System compares by. :src:`test/shared_library_test.cpp` checks it across a shared library
+  that is compiled that way.
+* **It costs compile time.** The headers of c-ares and of the TLS library come with the resolver,
+  and so does its code: with clang, about half a second more to parse a translation unit than the
+  declarations alone would take, and one to three seconds more to compile one that makes a
+  resolver, depending on the optimization.
+
+The runtime layer was headers in anyhttp already. What it has in addition for being used this way
+is ``detail::error_category_base``, which gives a category the id that Boost.System compares by.
 
 Not done yet
 ------------

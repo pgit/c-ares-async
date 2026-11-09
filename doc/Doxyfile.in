@@ -11,18 +11,27 @@ STRIP_FROM_PATH        = @PROJECT_SOURCE_DIR@/include
 # has the same names in the same order -- doc/corosio.rst has the table of what they map to.
 #
 INPUT                  = @PROJECT_SOURCE_DIR@/include/c_ares_async/resolver.hpp \
+                         @PROJECT_SOURCE_DIR@/include/c_ares_async/https_record.hpp \
+                         @PROJECT_SOURCE_DIR@/include/c_ares_async/tls_options.hpp \
+                         @PROJECT_SOURCE_DIR@/include/c_ares_async/logging.hpp \
                          @PROJECT_SOURCE_DIR@/include/c_ares_async/error.hpp \
                          @PROJECT_SOURCE_DIR@/include/c_ares_async/asio/runtime.hpp
 EXCLUDE_SYMBOLS        = c_ares_async::detail c_ares_async::detail::* detail detail::*
 
+#
+# Everything is in the inline namespace of a runtime, which nobody spells: the reference has it in
+# c_ares_async itself, as a program sees it. The same goes for anyhttp's reference.
+#
+INPUT_FILTER           = "sed -E -e 's/^namespace c_ares_async::inline (asio|C_ARES_ASYNC_RUNTIME)$/namespace c_ares_async/'"
+
 # the first sentence of a comment is its summary, there is no need to say so with @brief
 JAVADOC_AUTOBRIEF      = YES
 
-# Doxygen does not compile anything, so what a compiler would get from config.hpp and export.hpp is
-# said here -- which is also why the reference takes neither Boost nor a configured runtime
+# Doxygen does not compile anything, so the runtime that a compiler would get from the target is
+# said here -- which is also why the reference takes neither Boost nor Corosio
 MACRO_EXPANSION        = YES
 EXPAND_ONLY_PREDEF     = YES
-PREDEFINED             = C_ARES_ASYNC_ASIO=1 C_ARES_ASYNC_COROSIO=0 C_ARES_ASYNC_EXPORT=
+PREDEFINED             = C_ARES_ASYNC_ASIO=1 C_ARES_ASYNC_COROSIO=0 C_ARES_ASYNC_RUNTIME=asio
 SEARCH_INCLUDES        = NO
 
 # what is not documented is not finished

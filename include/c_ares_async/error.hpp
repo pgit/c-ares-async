@@ -3,10 +3,9 @@
 
 #pragma once
 
-#include <c_ares_async/export.hpp>
 #include <c_ares_async/runtime.hpp>
 
-namespace c_ares_async
+namespace c_ares_async::inline C_ARES_ASYNC_RUNTIME
 {
 
 /** The error category of the c-ares status codes.
@@ -15,11 +14,17 @@ namespace c_ares_async
     `<ares.h>`, and this is the category they travel in as an
     @ref error_code. The messages are those of `ares_strerror()`.
 
+    It is one category wherever it is used, shared libraries included,
+    although the headers define it: on Asio it has an id, which
+    Boost.System compares categories by, and the function is visible
+    outside of the library it is compiled into, so that the dynamic linker
+    makes one of its copies.
+
     @return The one object of the category, whose name is "c-ares".
 
     @see make_ares_error
  */
-C_ARES_ASYNC_EXPORT const error_category& ares_category() noexcept;
+[[gnu::visibility("default")]] inline const error_category& ares_category() noexcept;
 
 /** Makes an error code out of a c-ares status code.
 
@@ -37,6 +42,8 @@ C_ARES_ASYNC_EXPORT const error_category& ares_category() noexcept;
 
     @return `status` as an error code in @ref ares_category.
  */
-C_ARES_ASYNC_EXPORT error_code make_ares_error(int status) noexcept;
+inline error_code make_ares_error(int status) noexcept;
 
-} // namespace c_ares_async
+} // namespace c_ares_async::inline C_ARES_ASYNC_RUNTIME
+
+#include <c_ares_async/impl/error.ipp>

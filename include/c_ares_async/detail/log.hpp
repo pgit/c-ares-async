@@ -7,12 +7,13 @@
 //
 #pragma once
 
-#include <c_ares_async/resolver.hpp>
+#include <c_ares_async/logging.hpp>
+#include <c_ares_async/runtime.hpp>
 
 #include <format>
 #include <utility>
 
-namespace c_ares_async::detail
+namespace c_ares_async::inline C_ARES_ASYNC_RUNTIME::detail
 {
 
 //
@@ -44,4 +45,4 @@ void log_error(const log_function& logger, std::format_string<Args...> format, A
    log(logger, log_level::error, format, std::forward<Args>(args)...);
 }
 
-} // namespace c_ares_async::detail
+} // namespace c_ares_async::inline C_ARES_ASYNC_RUNTIME::detail

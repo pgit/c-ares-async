@@ -1,7 +1,7 @@
 # c-ares-async
 
-A small wrapper around the [c-ares](https://c-ares.org/) DNS library that makes its lookups
-asynchronous operations, using either
+A small, header-only wrapper around the [c-ares](https://c-ares.org/) DNS library that makes its
+lookups asynchronous operations, using either
 [Asio](https://www.boost.org/doc/libs/release/doc/html/boost_asio.html) or
 [Corosio](https://github.com/cppalliance/corosio) as the async runtime.
 
@@ -21,9 +21,10 @@ number of lookups in flight at once, and more to ask for than addresses:
   callback -- and can be cancelled.
 
 On Corosio, which has [Capy](https://github.com/cppalliance/capy) as a dependency, the operations
-are coroutines and nothing else. One build tree is one runtime or the other,
-`-DC_ARES_ASYNC_API=ASIO` or `COROSIO`; see [the Corosio runtime](doc/corosio.rst) for what the two
-map to.
+are coroutines and nothing else. Which of the two runtimes is up to the program, one translation
+unit at a time: the CMake targets `c_ares_async::asio` and `c_ares_async::corosio` each select
+their own. Both can be in the same program, as everything is in an inline namespace of
+the runtime's name. See [the Corosio runtime](doc/corosio.rst) for what the two map to.
 
 ## Example
 
@@ -88,9 +89,10 @@ names at once, DNS over TLS, cancellation.
 * A C++20 compiler and standard library. clang 23 with libc++ and GCC 14 with libstdc++ are the
   ones the tests run with.
 * CMake 3.25 or later.
-* [Boost](https://www.boost.org/) 1.88 or later, of which only headers are used. A COROSIO build
-  needs no Boost at all: Capy and Corosio are fetched at pinned commits and built along with the
-  library.
+* [Boost](https://www.boost.org/) 1.88 or later for Asio, of which only headers are used. On
+  Corosio there is no need for Boost: what is needed is
+  [Capy](https://github.com/cppalliance/capy) and Corosio, which have no releases yet. This
+  repository's own COROSIO build fetches them at pinned commits.
 * [c-ares](https://c-ares.org/) 1.34 or later. Make that 1.34.7 where lookups get cancelled: up
   to there, `ares_cancel()` can run into
   [GHSA-6wfj-rwm7-3542](https://github.com/c-ares/c-ares/security/advisories/GHSA-6wfj-rwm7-3542),
@@ -100,15 +102,26 @@ names at once, DNS over TLS, cancellation.
 
 ## Using it
 
-With the library installed, `find_package()` brings the target and everything it depends on:
+There is nothing to build: the library is headers, and a program compiles what it uses of them.
+With them installed, `find_package()` brings a target for each runtime and everything it depends
+on. The runtime is a component, Asio unless Corosio is asked for:
 
 ```cmake
-find_package(c_ares_async 0.1 REQUIRED)
+find_package(c_ares_async 0.1 REQUIRED)                      # c_ares_async::asio
 
-target_link_libraries(app PRIVATE c_ares_async::c_ares_async)
+target_link_libraries(app PRIVATE c_ares_async::asio)
 ```
 
-The target has the same name where the sources are part of the build instead, through
+```cmake
+find_package(c_ares_async 0.1 REQUIRED COMPONENTS corosio)   # c_ares_async::corosio
+
+target_link_libraries(app PRIVATE c_ares_async::corosio)
+```
+
+Corosio has no installed package yet, so the targets `Boost::corosio` and `Boost::capy` have to be
+there before, from a build of Corosio that is part of the program's own.
+
+The targets have the same names where the sources are part of the build instead, through
 `add_subdirectory()` or `FetchContent`. Tests, examples and documentation are left out then:
 
 ```cmake
@@ -120,22 +133,23 @@ FetchContent_Declare(
     GIT_TAG <tag or commit>)
 FetchContent_MakeAvailable(c_ares_async)
 
-target_link_libraries(app PRIVATE c_ares_async::c_ares_async)
+target_link_libraries(app PRIVATE c_ares_async::asio)
 ```
 
-Either way the target asks for C++20 and brings the include paths of Boost and c-ares with it,
-whose status codes are what a failed lookup is compared against. The TLS library stays out of
-sight: no header of the library includes one of its.
+Either way the target asks for C++20, defines the macro that selects its runtime
+(`C_ARES_ASYNC_ASIO` or `C_ARES_ASYNC_COROSIO`), and brings the include paths and libraries of the
+runtime, of c-ares and of the TLS library. Without CMake, it takes the `include` directory, those
+libraries, and `-DC_ARES_ASYNC_COROSIO=1` for Corosio -- nothing at all selects Asio. The headers
+include those of the TLS library, which is how they tell OpenSSL and AWS-LC apart.
 
 | Option | Default | |
 | --- | --- | --- |
-| `C_ARES_ASYNC_API` | `ASIO` | The I/O runtime to build on, `ASIO` or `COROSIO`, see [doc/corosio.rst](doc/corosio.rst). |
-| `C_ARES_ASYNC_TLS` | `OpenSSL` | The TLS library to build against, `OpenSSL` or `AWS-LC`. `ssl_ROOT` says where the latter is installed. |
-| `BUILD_SHARED_LIBS` | `OFF` | Builds a shared library instead of a static one. |
+| `C_ARES_ASYNC_API` | `ASIO` | The I/O runtime to build the tests and examples on, `ASIO` or `COROSIO`, see [doc/corosio.rst](doc/corosio.rst). A COROSIO build fetches Capy and Corosio, unless they are there already. The runtime targets are there wherever their runtime is, whichever this is. |
+| `C_ARES_ASYNC_TLS` | `OpenSSL` | The TLS library that the targets link, `OpenSSL` or `AWS-LC`. `ssl_ROOT` says where the latter is installed. |
 | `C_ARES_ASYNC_BUILD_TESTS` | top-level only | Builds the tests. Also off where `BUILD_TESTING` is. |
 | `C_ARES_ASYNC_BUILD_EXAMPLES` | top-level only | Builds the examples. |
 | `C_ARES_ASYNC_BUILD_DOCS` | top-level only | Builds the code of the guide, and adds the `docs` target where there is a `doxygen` and a `sphinx-build` to make them with. |
-| `C_ARES_ASYNC_INSTALL` | top-level only | Generates the install rules. Off, and refused, in a COROSIO build. |
+| `C_ARES_ASYNC_INSTALL` | top-level only | Generates the install rules: the headers and the CMake package, for both runtimes. |
 
 ## Building, testing, installing
 
@@ -155,9 +169,9 @@ ctest --preset dev
 | `release` | `build-release` | The same, optimized. |
 | `asan` | `build-asan` | With the address and undefined behaviour sanitizers. |
 | `tsan` | `build-tsan` | With the thread sanitizer. |
-| `openssl` | `build-openssl` | OpenSSL instead of AWS-LC, and the library as a shared one. |
+| `openssl` | `build-openssl` | OpenSSL instead of AWS-LC. |
 | `gcc` | `build-gcc` | GCC and libstdc++. |
-| `corosio` | `build-corosio` | On Corosio instead of Asio. |
+| `corosio` | `build-corosio` | The tests and examples on Corosio instead of Asio. |
 | `corosio-asan` | `build-corosio-asan` | The same, with the address and undefined behaviour sanitizers. |
 
 Anywhere else it is a CMake project like any other:
@@ -172,8 +186,10 @@ cmake --install build --prefix /usr/local
 The tests need no network. They ask a DNS server of their own, which runs in the test on the
 loopback interface and answers over UDP, TCP and TLS. [GoogleTest](https://github.com/google/googletest)
 is used where it is installed and fetched where it is not. Two of the tests build a project of
-their own, [`test/cmake_test`](test/cmake_test), against the installed library and against the
-source tree -- which is what keeps the two CMake snippets above true.
+their own, [`test/cmake_test`](test/cmake_test), against the installed headers and against the
+source tree, on the runtime of the build -- which is what keeps the CMake snippets above true.
+Others compile the headers into a shared library of their own, and, in a COROSIO build, put a
+lookup on Asio into the same program as the ones on Corosio.
 
 ## Documentation
 
@@ -193,12 +209,16 @@ source tree -- which is what keeps the two CMake snippets above true.
 
 * **Cancelling one lookup cancels all of them.** c-ares has no handle for a single request, so
   what a cancellation can do is `ares_cancel()`, for the whole resolver. Every pending operation
-  then completes with `c_ares_async::errors::canceled` -- `operation_aborted` on Asio,
-  `capy::error::canceled` on Corosio.
+  then completes with `c_ares_async::errors::canceled`, which compares equal to
+  `errc::operation_canceled` on either runtime. On Asio, only a terminal cancellation counts.
 * **A resolver is for one thread at a time.** Where the `io_context` runs on several, make its
   executor a strand and start the lookups from inside it.
 * **A lookup is not complete until the context ran its handler**, including where a resolver is
   destroyed with lookups pending: they complete as cancelled, but not from inside the destructor.
+* **A translation unit that includes `resolver.hpp` compiles the resolver.** That is what being
+  headers only comes to: with clang, about half a second more to parse than the declarations alone
+  would take, and one to three seconds more to compile where a resolver is made, depending on the
+  optimization. Keep the includes to the translation units that use one.
 * **The library does not log.** What it would have logged goes to the function given to
   `resolver::set_logger()`, which is where the reason for a failed TLS handshake is to be found.
 * **There is no promise of a stable interface before 1.0.** The minor version is part of the name

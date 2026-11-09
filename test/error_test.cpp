@@ -2,6 +2,7 @@
 // SPDX-License-Identifier: BSL-1.0
 
 #include <c_ares_async/error.hpp>
+#include <c_ares_async/runtime.hpp>
 
 #include <ares.h>
 
@@ -11,7 +12,6 @@
 
 using c_ares_async::ares_category;
 using c_ares_async::make_ares_error;
-using c_ares_async::make_system_error;
 
 TEST(Error, CategoryHasAName) { EXPECT_STREQ(ares_category().name(), "c-ares"); }
 
@@ -46,8 +46,21 @@ TEST(Error, IsNoSystemError)
    // The values overlap with errno -- ARES_ENODATA is 1, and so is EPERM -- which is what the
    // category is there to tell apart.
    //
-   EXPECT_NE(make_ares_error(ARES_ENODATA), make_system_error(ARES_ENODATA));
-   EXPECT_NE(make_ares_error(ARES_ENODATA), std::errc::operation_not_permitted);
+   const c_ares_async::error_code eperm =
+      make_error_code(c_ares_async::errc::operation_not_permitted);
+   ASSERT_EQ(eperm.value(), ARES_ENODATA);
+   EXPECT_NE(make_ares_error(ARES_ENODATA), eperm);
+   EXPECT_NE(make_ares_error(ARES_ENODATA), c_ares_async::errc::operation_not_permitted);
+}
+
+TEST(Error, CanceledIsThePortableCondition)
+{
+   //
+   // Whatever each runtime spells it as, a lookup that was cancelled compares equal to the error
+   // condition, as the runtime's own operations do.
+   //
+   EXPECT_EQ(c_ares_async::errors::canceled, c_ares_async::errc::operation_canceled);
+   EXPECT_NE(c_ares_async::errors::canceled, make_ares_error(ARES_ECANCELLED));
 }
 
 TEST(Error, TravelsInAnException)

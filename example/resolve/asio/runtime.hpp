@@ -148,8 +148,8 @@ public:
    static constexpr std::string_view concurrency_note =
       "the Asio resolver works through its lookups one at a time";
 
-   c_ares_async::Task<std::tuple<c_ares_async::error_code, c_ares_async::resolver::results_type>>
-   resolve(const std::string& host, const std::string& service)
+   c_ares_async::IoTask<c_ares_async::resolver::results_type> resolve(const std::string& host,
+                                                                      const std::string& service)
    {
       auto [ec, results] = co_await resolver_.async_resolve(host, service, boost::asio::as_tuple);
 

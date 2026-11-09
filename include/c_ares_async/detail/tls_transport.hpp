@@ -15,7 +15,9 @@
 //
 #pragma once
 
-#include <c_ares_async/resolver.hpp>
+#include <c_ares_async/logging.hpp>
+#include <c_ares_async/runtime.hpp>
+#include <c_ares_async/tls_options.hpp>
 
 #include <ares.h>
 
@@ -24,7 +26,7 @@
 #include <map>
 #include <memory>
 
-namespace c_ares_async::detail
+namespace c_ares_async::inline C_ARES_ASYNC_RUNTIME::detail
 {
 
 class tls_transport
@@ -89,4 +91,6 @@ private:
    std::map<ares_socket_t, std::unique_ptr<tls_session>> m_sessions;
 };
 
-} // namespace c_ares_async::detail
+} // namespace c_ares_async::inline C_ARES_ASYNC_RUNTIME::detail
+
+#include <c_ares_async/impl/tls_transport.ipp>

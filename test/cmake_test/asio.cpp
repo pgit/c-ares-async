@@ -2,8 +2,9 @@
 // SPDX-License-Identifier: BSL-1.0
 
 //
-// Uses enough of the library to need its headers, its symbols and those of its dependencies, and
-// nothing that needs a network: an address is resolved without asking anybody.
+// Uses enough of the library to need its headers and those of its dependencies, on Asio, and
+// nothing that needs a network: an address is resolved without asking anybody. corosio.cpp is the
+// same on Corosio.
 //
 #include <c_ares_async.hpp>
 
@@ -26,8 +27,8 @@ int main()
       });
    context.run();
 
-   std::cout << "c_ares_async " << C_ARES_ASYNC_VERSION_STRING << ": "
-             << (resolved ? "resolved" : "FAILED") << '\n';
+   std::cout << "c_ares_async " << C_ARES_ASYNC_VERSION_STRING
+             << " on Asio: " << (resolved ? "resolved" : "FAILED") << '\n';
 
    return resolved ? EXIT_SUCCESS : EXIT_FAILURE;
 }

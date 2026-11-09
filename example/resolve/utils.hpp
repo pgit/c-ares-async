@@ -19,7 +19,7 @@
 //
 // Under NDEBUG this is plain run() and prints nothing.
 //
-// A template only because the event loop is the one of whichever runtime this was built on, and
+// A template only because the event loop is the one of whichever runtime this is built on, and
 // runtime.hpp is what knows which: it includes this, not the other way round. Both have run_one().
 //
 template <typename Context>

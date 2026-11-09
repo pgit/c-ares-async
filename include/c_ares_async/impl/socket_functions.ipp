@@ -1,7 +1,9 @@
 // Copyright (c) 2026 Peter Eisenlohr
 // SPDX-License-Identifier: BSL-1.0
 
-#include "socket_functions.hpp"
+#pragma once
+
+#include <c_ares_async/detail/socket_functions.hpp> // NOLINT(misc-header-include-cycle)
 
 #include <net/if.h>
 #include <netinet/in.h>
@@ -11,11 +13,11 @@
 
 #include <cerrno>
 
-namespace c_ares_async::detail
+namespace c_ares_async::inline C_ARES_ASYNC_RUNTIME::detail
 {
 
-int set_socket_option(ares_socket_t fd, ares_socket_opt_t opt, const void* value,
-                      ares_socklen_t size)
+inline int set_socket_option(ares_socket_t fd, ares_socket_opt_t opt, const void* value,
+                             ares_socklen_t size)
 {
    switch (opt)
    {
@@ -41,14 +43,11 @@ int set_socket_option(ares_socket_t fd, ares_socket_opt_t opt, const void* value
    return -1;
 }
 
-namespace
-{
-
 //
 // Everything else is what c-ares would do itself. The sockets are non-blocking and close on exec
 // from the start, which is what ARES_SOCKFUNC_FLAG_NONBLOCKING promises the library.
 //
-const struct ares_socket_functions_ex& functions()
+inline const struct ares_socket_functions_ex& functions()
 {
    static const struct ares_socket_functions_ex table{
       .version = 1,
@@ -125,11 +124,9 @@ const struct ares_socket_functions_ex& functions()
    return table;
 }
 
-} // namespace
-
-ares_status_t install_socket_functions(ares_channel_t* channel)
+inline ares_status_t install_socket_functions(ares_channel_t* channel)
 {
    return ares_set_socket_functions_ex(channel, &functions(), nullptr);
 }
 
-} // namespace c_ares_async::detail
+} // namespace c_ares_async::inline C_ARES_ASYNC_RUNTIME::detail

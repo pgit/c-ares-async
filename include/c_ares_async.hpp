@@ -7,6 +7,9 @@
 #pragma once
 
 #include <c_ares_async/error.hpp>
+#include <c_ares_async/https_record.hpp>
+#include <c_ares_async/logging.hpp>
 #include <c_ares_async/resolver.hpp>
 #include <c_ares_async/runtime.hpp>
+#include <c_ares_async/tls_options.hpp>
 #include <c_ares_async/version.hpp>

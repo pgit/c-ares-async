@@ -67,4 +67,4 @@ jobs:
       - name: Check the formatting
         run: |
           git config --global --add safe.directory "$GITHUB_WORKSPACE"
-          git ls-files '*.cpp' '*.hpp' | xargs clang-format --dry-run --Werror
+          git ls-files '*.cpp' '*.hpp' '*.ipp' | xargs clang-format --dry-run --Werror

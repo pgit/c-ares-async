@@ -3,7 +3,7 @@
 
 //
 // Resolves the host names given on the command line, or those of the URLs listed in a file, using
-// c-ares driven by the event loop of the runtime the library was built on. With --native, the
+// c-ares driven by the event loop of the runtime the program is built on. With --native, the
 // resolver of that runtime itself (a getaddrinfo() call on a thread of its own) is used instead,
 // which is the behaviour to compare against.
 //

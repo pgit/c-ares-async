@@ -6,7 +6,7 @@
 // through for DNS over TLS, where nothing listens on the port that c-ares defaults to. The
 // sources are compiled into the test to get at it.
 //
-#include "server_list.hpp"
+#include <c_ares_async/detail/server_list.hpp>
 
 #include <gtest/gtest.h>
 

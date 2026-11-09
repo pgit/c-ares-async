@@ -1,10 +1,11 @@
 // Copyright (c) 2026 Peter Eisenlohr
 // SPDX-License-Identifier: BSL-1.0
 
-#include "tls_transport.hpp"
+#pragma once
 
-#include "log.hpp"
-#include "socket_functions.hpp"
+#include <c_ares_async/detail/log.hpp>
+#include <c_ares_async/detail/socket_functions.hpp>
+#include <c_ares_async/detail/tls_transport.hpp> // NOLINT(misc-header-include-cycle)
 
 #include <openssl/bio.h>
 #include <openssl/err.h>
@@ -26,16 +27,13 @@
 #include <limits>
 #include <stdexcept>
 
-namespace c_ares_async::detail
-{
-
-namespace
+namespace c_ares_async::inline C_ARES_ASYNC_RUNTIME::detail
 {
 
 //
 // Drains OpenSSL's error queue into something printable.
 //
-std::string ssl_error()
+inline std::string ssl_error()
 {
    std::string message;
    while (const auto code = ERR_get_error())
@@ -55,7 +53,7 @@ std::string ssl_error()
 // known even for groups without an EVP_PKEY, like the post-quantum hybrids, which is also why
 // there may be no bit count to go with it.
 //
-std::string key_exchange(SSL* ssl)
+inline std::string key_exchange(SSL* ssl)
 {
 #if defined(OPENSSL_IS_AWSLC) || defined(OPENSSL_IS_BORINGSSL)
    const char* group = SSL_get_group_name(SSL_get_group_id(ssl));
@@ -76,7 +74,7 @@ std::string key_exchange(SSL* ssl)
 //
 // A distinguished name in RFC 2253 form, e.g. "CN=dns.google".
 //
-std::string distinguished_name(const X509_NAME* name)
+inline std::string distinguished_name(const X509_NAME* name)
 {
    if (!name)
       return "none";
@@ -100,7 +98,7 @@ std::string distinguished_name(const X509_NAME* name)
 //
 // What was negotiated.
 //
-std::string handshake_info(SSL* ssl)
+inline std::string handshake_info(SSL* ssl)
 {
    return std::format("{}, cipher={}, group={}{}", SSL_get_version(ssl), SSL_get_cipher_name(ssl),
                       key_exchange(ssl), SSL_session_reused(ssl) ? ", resumed" : "");
@@ -109,7 +107,7 @@ std::string handshake_info(SSL* ssl)
 //
 // Who we negotiated it with.
 //
-std::string peer_info(SSL* ssl)
+inline std::string peer_info(SSL* ssl)
 {
    const X509* peer = SSL_get0_peer_certificate(ssl);
    if (!peer)
@@ -125,8 +123,6 @@ std::string peer_info(SSL* ssl)
                       distinguished_name(X509_get_issuer_name(peer)),
                       verified ? "verified" : "NOT verified");
 }
-
-} // namespace
 
 // --------------------------------------------------------------------------------------------------
 
@@ -155,7 +151,7 @@ struct tls_transport::tls_session
 
 // --------------------------------------------------------------------------------------------------
 
-tls_transport::tls_transport(tls_options options, const log_function& logger)
+inline tls_transport::tls_transport(tls_options options, const log_function& logger)
    : m_options(std::move(options)), m_logger(logger)
 {
    m_context = SSL_CTX_new(TLS_client_method());
@@ -185,14 +181,14 @@ tls_transport::tls_transport(tls_options options, const log_function& logger)
    }
 }
 
-tls_transport::~tls_transport()
+inline tls_transport::~tls_transport()
 {
    m_sessions.clear(); // frees the SSL objects while the context is still around
    if (m_context)
       SSL_CTX_free(m_context);
 }
 
-void tls_transport::install(ares_channel_t* channel)
+inline void tls_transport::install(ares_channel_t* channel)
 {
    if (const auto status = ares_set_socket_functions_ex(channel, &functions(), this);
        status != ARES_SUCCESS)
@@ -200,7 +196,7 @@ void tls_transport::install(ares_channel_t* channel)
                                ares_strerror(static_cast<int>(status)));
 }
 
-tls_transport::tls_session* tls_transport::find(ares_socket_t fd)
+inline tls_transport::tls_session* tls_transport::find(ares_socket_t fd)
 {
    const auto it = m_sessions.find(fd);
    return it == m_sessions.end() ? nullptr : it->second.get();
@@ -208,7 +204,7 @@ tls_transport::tls_session* tls_transport::find(ares_socket_t fd)
 
 // --------------------------------------------------------------------------------------------------
 
-tls_transport::interest tls_transport::advance(ares_socket_t fd, bool writable)
+inline tls_transport::interest tls_transport::advance(ares_socket_t fd, bool writable)
 {
    auto* session = find(fd);
    if (!session)
@@ -290,7 +286,7 @@ tls_transport::interest tls_transport::advance(ares_socket_t fd, bool writable)
    }
 }
 
-bool tls_transport::start_handshake(tls_session& session, ares_socket_t fd)
+inline bool tls_transport::start_handshake(tls_session& session, ares_socket_t fd)
 {
    session.ssl = SSL_new(m_context);
    if (!session.ssl)
@@ -331,7 +327,7 @@ bool tls_transport::start_handshake(tls_session& session, ares_socket_t fd)
 
 // --------------------------------------------------------------------------------------------------
 
-ares_socket_t tls_transport::on_socket(int domain, int type, int protocol)
+inline ares_socket_t tls_transport::on_socket(int domain, int type, int protocol)
 {
    const int fd = ::socket(domain, type | SOCK_NONBLOCK | SOCK_CLOEXEC, protocol);
    if (fd < 0)
@@ -351,7 +347,7 @@ ares_socket_t tls_transport::on_socket(int domain, int type, int protocol)
    return fd;
 }
 
-int tls_transport::on_close(ares_socket_t fd)
+inline int tls_transport::on_close(ares_socket_t fd)
 {
    if (auto* session = find(fd); session && session->state == tls_session::phase::established)
       SSL_shutdown(session->ssl); // best effort close_notify, the answer is already in
@@ -360,8 +356,8 @@ int tls_transport::on_close(ares_socket_t fd)
    return ::close(fd);
 }
 
-int tls_transport::on_connect(ares_socket_t fd, const struct sockaddr* address,
-                              ares_socklen_t length)
+inline int tls_transport::on_connect(ares_socket_t fd, const struct sockaddr* address,
+                                     ares_socklen_t length)
 {
    if (::connect(fd, address, length) == 0)
       return 0;
@@ -369,7 +365,7 @@ int tls_transport::on_connect(ares_socket_t fd, const struct sockaddr* address,
    return -1; // errno is set, and for a non-blocking socket it is almost always EINPROGRESS
 }
 
-ares_ssize_t tls_transport::on_recv(ares_socket_t fd, void* buffer, size_t length)
+inline ares_ssize_t tls_transport::on_recv(ares_socket_t fd, void* buffer, size_t length)
 {
    auto* session = find(fd);
    if (!session)
@@ -416,7 +412,8 @@ ares_ssize_t tls_transport::on_recv(ares_socket_t fd, void* buffer, size_t lengt
    }
 }
 
-ares_ssize_t tls_transport::on_send(ares_socket_t fd, const void* buffer, size_t length, int flags)
+inline ares_ssize_t tls_transport::on_send(ares_socket_t fd, const void* buffer, size_t length,
+                                           int flags)
 {
    auto* session = find(fd);
    if (!session)
@@ -466,7 +463,7 @@ ares_ssize_t tls_transport::on_send(ares_socket_t fd, const void* buffer, size_t
 // The C side of it. Everything c-ares needs but we have no reason to intercept is forwarded to the
 // system call it would have made itself.
 //
-const struct ares_socket_functions_ex& tls_transport::functions()
+inline const struct ares_socket_functions_ex& tls_transport::functions()
 {
    static const struct ares_socket_functions_ex table{
       .version = 1,
@@ -534,4 +531,4 @@ const struct ares_socket_functions_ex& tls_transport::functions()
    return table;
 }
 
-} // namespace c_ares_async::detail
+} // namespace c_ares_async::inline C_ARES_ASYNC_RUNTIME::detail

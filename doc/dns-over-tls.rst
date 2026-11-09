@@ -14,7 +14,7 @@ What it does have is `ares_set_socket_functions_ex() <https://c-ares.org/docs/ar
 which replaces its socket layer wholesale. DNS over TCP is a length-prefixed byte stream and c-ares
 does that framing itself, so wrapping the stream in TLS is enough to make it DNS over TLS
 (`RFC 7858 <https://www.rfc-editor.org/rfc/rfc7858>`__). That is what
-:src:`src/tls_transport.cpp` does, against the OpenSSL API:
+:src:`include/c_ares_async/impl/tls_transport.ipp` does, against the OpenSSL API:
 
 * :cpp:member:`tls_options::enabled` puts the channel in ``ARES_FLAG_USEVC | ARES_FLAG_STAYOPEN`` -- TCP only,
   and the connection outlives the query, because otherwise it is a handshake per name;

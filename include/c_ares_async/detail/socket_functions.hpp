@@ -13,30 +13,34 @@
 // the query a second time and drops the connection, which costs a lookup every retry it has.
 //
 // Refusing the option with ENOSYS is what c-ares takes for "this one does not do fast open",
-// which is also what src/tls_transport.cpp does for the TLS transport -- the handshake there
+// which is also what impl/tls_transport.ipp does for the TLS transport -- the handshake there
 // needs a connection before the first write just as much.
 //
 // https://c-ares.org/docs/ares_set_socket_functions_ex.html
 //
 #pragma once
 
+#include <c_ares_async/runtime.hpp>
+
 #include <ares.h>
 
-namespace c_ares_async::detail
+namespace c_ares_async::inline C_ARES_ASYNC_RUNTIME::detail
 {
 
 //
 // Hands our socket functions to the channel, which must not have opened any sockets yet. Not for
 // a channel with a TLS transport on it: that one has socket functions of its own.
 //
-ares_status_t install_socket_functions(ares_channel_t* channel);
+inline ares_status_t install_socket_functions(ares_channel_t* channel);
 
 //
 // The one socket option that both the plain and the TLS socket functions answer the same way,
 // which is the one place TCP Fast Open is turned down. Returns what c-ares expects of
 // asetsockopt(): 0, or -1 with errno set.
 //
-int set_socket_option(ares_socket_t fd, ares_socket_opt_t opt, const void* value,
-                      ares_socklen_t size);
+inline int set_socket_option(ares_socket_t fd, ares_socket_opt_t opt, const void* value,
+                             ares_socklen_t size);
 
-} // namespace c_ares_async::detail
+} // namespace c_ares_async::inline C_ARES_ASYNC_RUNTIME::detail
+
+#include <c_ares_async/impl/socket_functions.ipp>

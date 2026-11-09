@@ -39,7 +39,7 @@ c-ares parses these itself: ``ares_search_dnsrec()`` asks the question the same 
 ``ares_getaddrinfo()`` does, search domains and all, and the answer comes back as an
 ``ares_dns_record_t`` rather than as bytes. The priority and target come straight off it, but the
 SvcParams are opaque values whose syntax depends on their key, so
-:src:`src/resolver.cpp` asks ``ares_dns_opt_get_datatype()`` which wire format
+:src:`include/c_ares_async/impl/resolver.ipp` asks ``ares_dns_opt_get_datatype()`` which wire format
 each one uses and renders it the way the RFC presents it. An :cpp:struct:`https_record` has them as one string
 per parameter:
 
