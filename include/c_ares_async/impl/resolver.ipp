@@ -284,8 +284,13 @@ inline void addrinfo_callback(void* arg, int status, int timeouts, ares_addrinfo
 inline resolver::resolver(executor_type executor, const tls_options& tls)
    : m_executor(std::move(executor)), m_timer(std::make_unique<detail::Timer>(m_executor))
 {
-   if (int status = ares_library_init(ARES_LIB_INIT_ALL); status != ARES_SUCCESS)
-      throw system_error(make_ares_error(status), "ares_library_init");
+   //
+   // No ares_library_init() in here, and no ares_library_cleanup() in the destructor. Neither is
+   // thread safe: they are for the program to call, before it starts any other thread and once it
+   // has ended them all. Called for every resolver, they would race wherever resolvers are made or
+   // destroyed on more than one thread at a time. c-ares does without them anywhere but on
+   // Windows, see https://linux.die.net/man/3/ares_library_init.
+   //
 
    //
    // The socket state callback is what makes this work without c-ares' own event thread: it tells
@@ -345,7 +350,6 @@ inline resolver::resolver(executor_type executor, const tls_options& tls)
       if (m_channel)
          ares_destroy(m_channel);
 
-      ares_library_cleanup();
       throw;
    }
 }
@@ -371,7 +375,6 @@ inline resolver::~resolver()
    ares_destroy(m_channel); // fails pending queries with ARES_EDESTRUCTION and closes all sockets
    m_sockets.clear();
    m_timer->cancel();
-   ares_library_cleanup();
 }
 
 // --------------------------------------------------------------------------------------------------

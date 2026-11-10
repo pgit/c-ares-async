@@ -38,6 +38,7 @@ add_executable(
     shared_library_test.cpp
     test_certificate.cpp
     test_certificate.hpp
+    threads_test.cpp
     tls_test.cpp)
 
 if (c_ares_async_runtime STREQUAL "corosio")

@@ -27,6 +27,9 @@
 #else
 #include <boost/capy/error.hpp>
 #include <boost/capy/ex/run.hpp>
+#include <boost/capy/ex/run_async.hpp>
+#include <boost/capy/ex/strand.hpp>
+#include <boost/corosio/io_context.hpp>
 #include <boost/corosio/timeout.hpp>
 #endif
 
@@ -279,6 +282,24 @@ c_ares_async::Task<void> times_out(c_ares_async::resolver& resolver)
       std::cerr << "took too long\n";
 }
 // [timeout-end]
+
+// [strand-corosio]
+void on_many_threads(boost::corosio::io_context& context)
+{
+   const auto strand = boost::capy::strand(context.get_executor());
+
+   boost::capy::run_async(strand)(
+      [](boost::capy::strand<boost::corosio::io_context::executor_type> strand)
+         -> c_ares_async::Task<void> {
+         //
+         // The coroutine runs on the strand, and so does the resolver, which takes it as it is.
+         //
+         c_ares_async::resolver resolver(strand);
+
+         co_await print_addresses(resolver, "example.com");
+      }(strand));
+}
+// [strand-corosio-end]
 
 #endif
 

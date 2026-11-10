@@ -183,6 +183,12 @@ Constraints
 * **corosio::io_context::poll() does not ask the reactor.** It runs what is ready already; a
   socket that became readable in the meantime is not noticed. Stepping such a context by hand
   takes ``run_one_for()``, see :src:`test/corosio/event_loop_fixture.hpp`.
+* **capy::any_executor takes no strand.** Capy rules ``capy::strand`` out of its constructor, so
+  that a ``strand<any_executor>`` can be made (Capy 7676188, still so on ``develop`` in November
+  2026). The resolver keeps its executor in an ``any_executor``, so it has a constructor of its own
+  for a ``capy::strand``, which puts the strand in under another type that forwards everything to
+  it. Nothing else changes: the coroutines and the resolver's own work run on the strand, which
+  :src:`test/threads_test.cpp` checks with four threads on one context. To be filed upstream.
 * **std::optional<c_ares_async::resolver> does not compile.** Capy's ``any_executor`` has a
   converting constructor that is constrained on ``std::copy_constructible`` only, so asking whether
   a resolver converts to an executor -- which ``std::optional`` does, through
@@ -203,9 +209,5 @@ Constraints
 Not done yet
 ------------
 
-* Threads. A resolver is for one thread at a time in either runtime, and where the ASIO build has
-  a strand test (``async_test.cpp``), the COROSIO one has none: ``capy::strand`` exists and Corosio
-  resumes a coroutine through the executor of its ``await_context``, so a resolver on a strand should stay
-  on it, but nothing here runs it that way yet.
 * Moving the pins. Both libraries are pre-release and change their API on ``develop`` without
   notice, so moving a pin is a commit of its own.

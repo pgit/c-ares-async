@@ -64,9 +64,16 @@ class tls_transport;
     completion token. See `doc/corosio.rst`.
 
     @par Thread safety
-    Distinct objects: safe. Shared objects: unsafe. Where the context runs on
-    more than one thread, make the executor of the resolver a strand and call
-    the resolver from inside that strand.
+    Distinct objects: safe. Shared objects: unsafe. A resolver also works
+    on its own, when one of its sockets is ready or its timer expires, and
+    does so on its executor. Where the context runs on more than one thread,
+    make that executor a strand, and use the resolver from inside that
+    strand only: start lookups from a coroutine on it, cancel them from
+    there, configure and destroy the resolver there. On Corosio, the
+    resolver takes a `capy::strand` with a constructor of its own. The
+    resolver does not call `ares_library_init()` or
+    `ares_library_cleanup()`, which are not thread safe. See
+    `doc/programmers-guide.rst`.
 
     @par Cancellation
     Both operations can be cancelled -- by a cancellation of the terminal
@@ -151,6 +158,20 @@ public:
        TLS library cannot.
     */
    explicit resolver(executor_type executor, const tls_options& tls = {});
+
+#if C_ARES_ASYNC_COROSIO
+   //
+   // Makes a resolver that runs on 'strand', as the one above does on an executor. Corosio only:
+   // capy::any_executor, which is the executor_type there, takes no capy::strand, so the strand
+   // goes in under another type. See doc/corosio.rst.
+   //
+   template <typename Ex>
+   explicit resolver(boost::capy::strand<Ex> strand, const tls_options& tls = {})
+      : resolver(executor_type(detail::StrandExecutor<boost::capy::strand<Ex>>{std::move(strand)}),
+                 tls)
+   {
+   }
+#endif
 
    /** Completes every pending operation with @ref errors::canceled and
        closes the sockets.

@@ -211,8 +211,11 @@ lookup on Asio into the same program as the ones on Corosio.
   what a cancellation can do is `ares_cancel()`, for the whole resolver. Every pending operation
   then completes with `c_ares_async::errors::canceled`, which compares equal to
   `errc::operation_canceled` on either runtime. On Asio, only a terminal cancellation counts.
-* **A resolver is for one thread at a time.** Where the `io_context` runs on several, make its
-  executor a strand and start the lookups from inside it.
+* **A resolver is for one thread at a time,** and any number of them may be in use at once. Where
+  the context runs on several threads, make the resolver's executor a strand -- a `capy::strand` on
+  Corosio, which the resolver takes as it is -- and use the resolver from inside it only, cancelling
+  included. The resolver calls neither `ares_library_init()` nor `ares_library_cleanup()`, which
+  are not thread safe.
 * **A lookup is not complete until the context ran its handler**, including where a resolver is
   destroyed with lookups pending: they complete as cancelled, but not from inside the destructor.
 * **A translation unit that includes `resolver.hpp` compiles the resolver.** That is what being
