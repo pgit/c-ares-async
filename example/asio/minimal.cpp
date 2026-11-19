@@ -8,6 +8,7 @@
 //    minimal [host]
 //
 #include <c_ares_async.hpp>
+#include <c_ares_async/asio/formatter.hpp>
 
 #include <boost/asio/as_tuple.hpp>
 #include <boost/asio/awaitable.hpp>
@@ -17,6 +18,7 @@
 #include <boost/asio/this_coro.hpp>
 #include <boost/asio/use_awaitable.hpp>
 
+#include <format>
 #include <iostream>
 #include <string>
 
@@ -33,7 +35,7 @@ asio::awaitable<void> lookup(std::string host)
       std::cerr << host << ": " << ec.message() << '\n';
 
    for (const auto& endpoint : endpoints)
-      std::cout << host << ": " << endpoint << '\n';
+      std::cout << std::format("{}: {}\n", host, endpoint);
 
    //
    // Most names have no HTTPS record, which is no error worth a mention.

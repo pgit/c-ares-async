@@ -8,6 +8,7 @@
 //    minimal [host]
 //
 #include <c_ares_async.hpp>
+#include <c_ares_async/corosio/formatter.hpp>
 
 #include <boost/capy/ex/run_async.hpp>
 #include <boost/corosio/io_context.hpp>
@@ -27,17 +28,11 @@ c_ares_async::Task<void> lookup(c_ares_async::Executor executor, std::string hos
       std::cerr << host << ": " << ec.message() << '\n';
 
    //
-   // Corosio has no output operator for an endpoint, so here is one: the address, in brackets
-   // where it is an IPv6 one, and the port behind it.
+   // Corosio has no output operator for an endpoint, c_ares_async/corosio/formatter.hpp has
+   // std::format write it as Asio does.
    //
-   const auto text = [](const c_ares_async::TcpEndpoint& endpoint) {
-      return endpoint.address().is_v6()
-                ? std::format("[{}]:{}", endpoint.address().to_string(), endpoint.port())
-                : std::format("{}:{}", endpoint.address().to_string(), endpoint.port());
-   };
-
    for (const auto& endpoint : endpoints)
-      std::cout << host << ": " << text(endpoint) << '\n';
+      std::cout << std::format("{}: {}\n", host, endpoint);
 
    //
    // Most names have no HTTPS record, which is no error worth a mention.

@@ -171,8 +171,10 @@ target_sources(
               BASE_DIRS include
               FILES include/c_ares_async.hpp
                     include/c_ares_async/asio/event_loop.hpp
+                    include/c_ares_async/asio/formatter.hpp
                     include/c_ares_async/asio/runtime.hpp
                     include/c_ares_async/corosio/event_loop.hpp
+                    include/c_ares_async/corosio/formatter.hpp
                     include/c_ares_async/corosio/runtime.hpp
                     include/c_ares_async/detail/event_loop.hpp
                     include/c_ares_async/detail/log.hpp
