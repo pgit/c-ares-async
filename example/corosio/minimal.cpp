@@ -2,20 +2,23 @@
 // SPDX-License-Identifier: BSL-1.0
 
 //
-// The shortest program that resolves a name, on Corosio: the addresses of a host, and then
-// its HTTPS record, each awaited in a coroutine. ../asio/minimal.cpp is the same on Asio.
+// The shortest program that resolves a name, on Corosio: the addresses of a host, awaited in a
+// coroutine. ../asio/minimal.cpp is the same on Asio.
 //
 //    minimal [host]
+//
+// lookup() takes its executor from capy::this_coro::executor, a reference into the frame of
+// run_async()'s trampoline. The resolver stops its work when it goes, without waiting for it, and
+// that work resumes through the reference once the frame is gone: with new_delete_resource() in
+// place of the frame allocator, AddressSanitizer reports a heap-use-after-free. The same, with
+// nothing of c-ares-async in it: ../../test/corosio/this_coro_executor.cpp.
 //
 #include <c_ares_async.hpp>
 #include <c_ares_async/corosio/formatter.hpp>
 
 #include <boost/capy/ex/run_async.hpp>
 #include <boost/corosio/io_context.hpp>
-#include "boost/capy/ex/any_executor.hpp"
 
-#include <exception>
-#include <format>
 #include <iostream>
 #include <memory_resource>
 #include <string>
@@ -35,23 +38,6 @@ static c_ares_async::Task<void> lookup(std::string host)
 
    for (const auto& endpoint : endpoints)
       std::cout << std::format("{}: {}\n", host, endpoint);
-
-   //
-   // Most names have no HTTPS record, which is no error worth a mention.
-   //
-   const auto [https_ec, records] = co_await resolver.resolve_https(host);
-
-   if (https_ec && https_ec != c_ares_async::make_ares_error(ARES_ENODATA))
-      std::cerr << host << ": HTTPS: " << https_ec.message() << '\n';
-
-   for (const auto& record : records)
-   {
-      std::cout << host << ": HTTPS " << record.priority << ' '
-                << (record.target.empty() ? "." : record.target);
-      for (const auto& param : record.params)
-         std::cout << ' ' << param;
-      std::cout << '\n';
-   }
 }
 
 int main(int argc, char* argv[])

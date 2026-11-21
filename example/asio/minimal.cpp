@@ -2,10 +2,13 @@
 // SPDX-License-Identifier: BSL-1.0
 
 //
-// The shortest program that resolves a name: the addresses of a host, and then its HTTPS record,
-// each awaited in a coroutine.
+// The shortest program that resolves a name: the addresses of a host, awaited in a coroutine.
 //
 //    minimal [host]
+//
+// The resolver stops its work when it goes, without waiting for it, so that work can finish after
+// lookup() has. That is harmless here, as the executor is a copy that refers to the io_context
+// alone. The same, with nothing of c-ares-async in it: ../../test/asio/this_coro_executor.cpp.
 //
 #include <c_ares_async.hpp>
 #include <c_ares_async/asio/formatter.hpp>
@@ -36,24 +39,6 @@ asio::awaitable<void> lookup(std::string host)
 
    for (const auto& endpoint : endpoints)
       std::cout << std::format("{}: {}\n", host, endpoint);
-
-   //
-   // Most names have no HTTPS record, which is no error worth a mention.
-   //
-   const auto [https_ec, records] =
-      co_await resolver.async_resolve_https(host, asio::as_tuple(asio::use_awaitable));
-
-   if (https_ec && https_ec != c_ares_async::make_ares_error(ARES_ENODATA))
-      std::cerr << host << ": HTTPS: " << https_ec.message() << '\n';
-
-   for (const auto& record : records)
-   {
-      std::cout << host << ": HTTPS " << record.priority << ' '
-                << (record.target.empty() ? "." : record.target);
-      for (const auto& param : record.params)
-         std::cout << ' ' << param;
-      std::cout << '\n';
-   }
 }
 
 int main(int argc, char* argv[])

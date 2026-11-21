@@ -39,7 +39,9 @@
 #include <stop_token>
 #include <string>
 #include <string_view>
+#include <thread>
 #include <utility>
+#include <vector>
 
 namespace snippets
 {
@@ -283,21 +285,21 @@ c_ares_async::Task<void> times_out(c_ares_async::resolver& resolver)
 }
 // [timeout-end]
 
+//
+// The strand comes from capy::this_coro::executor, a reference into the frame of run_async()'s
+// trampoline, which the resolver's stopped work can outlive. See
+// test/corosio/this_coro_executor.cpp.
+//
 // [strand-corosio]
 void on_many_threads(boost::corosio::io_context& context)
 {
    const auto strand = boost::capy::strand(context.get_executor());
 
-   boost::capy::run_async(strand)(
-      [](boost::capy::strand<boost::corosio::io_context::executor_type> strand)
-         -> c_ares_async::Task<void> {
-         //
-         // The coroutine runs on the strand, and so does the resolver, which takes it as it is.
-         //
-         c_ares_async::resolver resolver(strand);
-
-         co_await print_addresses(resolver, "example.com");
-      }(strand));
+   boost::capy::run_async(strand)([]() -> c_ares_async::Task<void>{
+      auto strand = co_await boost::capy::this_coro::executor;
+      c_ares_async::resolver resolver(strand);
+      co_await print_addresses(resolver, "example.com");
+   }());
 }
 // [strand-corosio-end]
 
