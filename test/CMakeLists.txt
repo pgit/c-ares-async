@@ -91,6 +91,28 @@ if (c_ares_async_runtime STREQUAL "corosio")
     target_link_libraries(c_ares_async_tests PRIVATE c_ares_async_test_asio_lookup)
 endif()
 
+#
+# Why a resolver on Corosio is given its executor rather than what capy::this_coro::executor
+# yields, with Capy and Corosio alone -- and the same on Asio, with Asio alone. The Corosio one
+# reads freed memory, which only AddressSanitizer is sure to tell, so they are built with the tests
+# to keep them compiling, and run by hand. See the sources.
+#
+if (c_ares_async_runtime STREQUAL "corosio")
+    add_executable(c_ares_async_test_this_coro_executor corosio/this_coro_executor.cpp)
+    target_link_libraries(c_ares_async_test_this_coro_executor PRIVATE Boost::corosio Boost::capy)
+else()
+    add_executable(c_ares_async_test_this_coro_executor asio/this_coro_executor.cpp)
+    target_link_libraries(c_ares_async_test_this_coro_executor PRIVATE Boost::headers
+                                                                       Threads::Threads)
+    target_compile_features(c_ares_async_test_this_coro_executor PRIVATE cxx_std_20)
+    # every frame freed as it goes, for AddressSanitizer to see
+    target_compile_definitions(
+        c_ares_async_test_this_coro_executor PRIVATE BOOST_ASIO_NO_DEPRECATED
+                                                     BOOST_ASIO_DISABLE_AWAITABLE_FRAME_RECYCLING)
+endif()
+set_target_properties(c_ares_async_test_this_coro_executor PROPERTIES OUTPUT_NAME
+                                                                      this_coro_executor)
+
 include(GoogleTest)
 gtest_discover_tests(c_ares_async_tests DISCOVERY_TIMEOUT 60 PROPERTIES TIMEOUT 120)
 
