@@ -32,7 +32,6 @@ asio::awaitable<void> lookup(std::string host)
    c_ares_async::resolver resolver(co_await asio::this_coro::executor);
 
    const auto [ec, endpoints] = co_await resolver.resolve(host, "443");
-   co_await resolver.async_resolve(host, "443", asio::as_tuple(asio::use_awaitable));
 
    if (ec)
       std::cerr << host << ": " << ec.message() << '\n';

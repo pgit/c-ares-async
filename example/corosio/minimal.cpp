@@ -28,8 +28,7 @@ namespace corosio = boost::corosio;
 
 static c_ares_async::Task<void> lookup(std::string host)
 {
-   auto executor = co_await capy::this_coro::executor;
-   c_ares_async::resolver resolver(executor);
+   c_ares_async::resolver resolver(co_await capy::this_coro::executor);
 
    const auto [ec, endpoints] = co_await resolver.resolve(host, "443");
 
