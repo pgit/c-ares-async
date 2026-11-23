@@ -82,7 +82,9 @@ commit that is fetched:
   certificate checked for ``host`` -- or the chain alone, and no SNI, for an empty one;
 * ``quic::Config::tls_verify``.
 
-Until it is in anyhttp itself, the pin and the patch go together.
+The patch is `anyhttp#50 <https://github.com/pgit/anyhttp/pull/50>`__, tests and documentation
+included. Until that is merged, the pin and the patch go together; once it is, the pin moves past it
+and the patch goes.
 
 What is not there
 -----------------

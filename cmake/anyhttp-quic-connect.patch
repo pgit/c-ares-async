@@ -1,22 +1,66 @@
-From a847678226ea065444a589367715cc64e0b51b01 Mon Sep 17 00:00:00 2001
-From: Peter Eisenlohr <peter-claude@eisenlohr.org>
-Date: Mon, 23 Nov 2026 21:56:55 +0000
-Subject: [PATCH] quic::connect() to endpoints, verifying for a name of their
- own, or not at all
+From c12e027af28a97951b6c5c7c869cc299afc7e5a2 Mon Sep 17 00:00:00 2001
+From: Peter Eisenlohr <peter@eisenlohr.org>
+Date: Mon, 23 Nov 2026 22:20:14 +0000
+Subject: [PATCH] quic: connect() to endpoints, with a name of their own to
+ verify, or none
 
-A client that knows the address of its server already, and the server's name apart from that --
-DNS over QUIC, where the server list has addresses only -- connects with the endpoints and the
-name the certificate has to be valid for. An empty name checks the chain only and sends no SNI.
-Config::tls_verify turns verification off, for testing.
+A client that has the address of its server already, and the server's name apart from it, has no
+use for a connect() that resolves the host and checks the certificate against that same host. A DNS
+resolver is one: c-ares knows its servers by address only, and DNS over QUIC (RFC 9250) takes the
+name the certificate is for from elsewhere. Nor could verification be turned off, for testing.
+
+quic::connect(executor, endpoints, host, config) connects to the first of the endpoints that gets
+there, and checks the certificate for host -- a name, sent as SNI, or an address. An empty host
+checks the chain only, and sends no SNI. Config::tls_verify turns the check off; the warning about
+the server certificate that handle_error() logs is left out then, as nothing was decided by it.
+Both overloads are connect_to() underneath.
+
+Tests in test_quic.cpp; the guide has a paragraph, and the reference both overloads by their
+signatures.
 
 Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>
 ---
- include/anyhttp/quic.hpp        | 19 +++++++++++++
- include/anyhttp/quic/client.hpp |  4 +++
- src/quic/client.cpp             | 18 ++++++++----
- src/quic/connection.cpp         | 49 ++++++++++++++++++++++++++++-----
- 4 files changed, 78 insertions(+), 12 deletions(-)
+ docs/programmers-guide.rst      |  6 +++
+ docs/reference.rst              |  4 +-
+ include/anyhttp/quic.hpp        | 19 ++++++++++
+ include/anyhttp/quic/client.hpp |  4 ++
+ src/quic/client.cpp             | 18 ++++++---
+ src/quic/connection.cpp         | 49 +++++++++++++++++++++----
+ test/test_quic.cpp              | 65 +++++++++++++++++++++++++++++++++
+ 7 files changed, 152 insertions(+), 13 deletions(-)
 
+diff --git a/docs/programmers-guide.rst b/docs/programmers-guide.rst
+index a3891fe..3323cd7 100644
+--- a/docs/programmers-guide.rst
++++ b/docs/programmers-guide.rst
+@@ -496,6 +496,12 @@ The ends map onto the contract of :doc:`end-of-body`:
+ The two directions are independent. Opening a stream never waits: at the peer's limit,
+ :cpp:func:`open_stream() <quic::Connection::open_stream>` fails with :cpp:var:`errors::would_block`.
+ A connection is closed when its handle goes away, on the server when the handler returns.
++
++A client that has the address of its server from somewhere else -- a DNS resolver, whose list of
++servers is addresses -- connects to those endpoints with the other overload of
++:cpp:func:`quic::connect`, and gives the name the certificate has to be valid for apart from them.
++An empty name checks the chain only and sends no SNI, and :cpp:member:`quic::Config::tls_verify`
++turns the check off altogether, for testing.
+ :cpp:struct:`quic::Config` has the flow control limits and how writes reach the stack, and
+ :src:`docs/quic-streams-plan.md` has how all this came about.
+ 
+diff --git a/docs/reference.rst b/docs/reference.rst
+index 7ebe438..ceb1f2c 100644
+--- a/docs/reference.rst
++++ b/docs/reference.rst
+@@ -104,7 +104,9 @@ Plain QUIC streams
+ 
+    #include <anyhttp/quic.hpp>
+ 
+-.. doxygenfunction:: anyhttp::quic::connect
++.. doxygenfunction:: anyhttp::quic::connect(Executor executor, std::string host, std::string port, Config config)
++
++.. doxygenfunction:: anyhttp::quic::connect(Executor executor, std::vector<TcpEndpoint> endpoints, std::string host, Config config)
+ 
+ .. doxygenfunction:: anyhttp::quic::async_connect
+ 
 diff --git a/include/anyhttp/quic.hpp b/include/anyhttp/quic.hpp
 index 57862ee..9e26d8b 100644
 --- a/include/anyhttp/quic.hpp
@@ -125,7 +169,7 @@ index 22438a7..adc25f4 100644
            result != X509_V_OK && result != X509_V_ERR_INVALID_CALL)
           mlogw("server certificate: {}", X509_verify_cert_error_string(result));
 diff --git a/src/quic/connection.cpp b/src/quic/connection.cpp
-index 47e946b..3736371 100644
+index 47e946b..da2ba9b 100644
 --- a/src/quic/connection.cpp
 +++ b/src/quic/connection.cpp
 @@ -10,7 +10,9 @@
@@ -179,9 +223,9 @@ index 47e946b..3736371 100644
 +      else
 +      {
 +         auto host_to_resolve = client_config.host;
-+         session = co_await async_connect(std::move(executor), std::move(host_to_resolve),
-+                                          std::move(target), std::move(client_config),
-+                                          std::move(factory));
++         session =
++            co_await async_connect(std::move(executor), std::move(host_to_resolve),
++                                   std::move(target), std::move(client_config), std::move(factory));
 +      }
  
        auto& application = static_cast<StreamApplication&>(*session->application());
@@ -208,6 +252,82 @@ index 47e946b..3736371 100644
  #if ANYHTTP_ASIO
  void async_connect_any(Executor executor, std::string host, std::string port, Config config,
                         ConnectHandler&& handler)
+diff --git a/test/test_quic.cpp b/test/test_quic.cpp
+index 9b74e48..6ad698a 100644
+--- a/test/test_quic.cpp
++++ b/test/test_quic.cpp
+@@ -490,6 +490,71 @@ TEST_P(QuicStreams, WHEN_alpn_is_unknown_THEN_connect_fails)
+    }());
+ }
+ 
++// -------------------------------------------------------------------------------------------------
++
++//
++// connect() to endpoints the client has already, with the name that the certificate has to be
++// valid for given apart from them: the server is at 127.0.0.2, and "localhost" is one of the
++// names of its certificate, "anyhttp.example" is not.
++//
++TEST_P(QuicStreams, WHEN_connecting_to_endpoints_THEN_the_certificate_is_checked_for_the_name_given)
++{
++   serverConnection = echo_streams;
++   run([&]() -> Task<void> {
++      auto [ec, connection] = co_await quic::connect(
++         context.get_executor(), {server->local_endpoint()}, "localhost", client_config());
++      EXPECT_FALSE(ec) << ec.message();
++      if (!connection)
++         co_return;
++
++      auto [open_ec, stream] = connection.open_stream();
++      std::ignore = co_await stream.write_eof(boost::asio::buffer("named", 5));
++      auto [read_ec, body] = co_await read_all(stream);
++      EXPECT_EQ(body, "named");
++   }());
++}
++
++TEST_P(QuicStreams, WHEN_the_name_given_is_not_the_certificates_THEN_connect_fails)
++{
++   run([&]() -> Task<void> {
++      auto [ec, connection] = co_await quic::connect(
++         context.get_executor(), {server->local_endpoint()}, "anyhttp.example", client_config());
++      EXPECT_TRUE(ec);
++      EXPECT_FALSE(connection);
++   }());
++}
++
++TEST_P(QuicStreams, WHEN_no_name_is_given_THEN_the_chain_is_still_checked)
++{
++   run([&]() -> Task<void> {
++      auto [ec, connection] = co_await quic::connect(
++         context.get_executor(), {server->local_endpoint()}, "", client_config());
++      EXPECT_FALSE(ec) << ec.message();
++
++      // the default trust store, which does not have the test PKI's root
++      auto config = client_config();
++      config.tls_ca_file.clear();
++      auto [untrusted_ec, untrusted] =
++         co_await quic::connect(context.get_executor(), {server->local_endpoint()}, "", config);
++      EXPECT_TRUE(untrusted_ec);
++      EXPECT_FALSE(untrusted);
++   }());
++}
++
++TEST_P(QuicStreams, WHEN_verification_is_off_THEN_any_certificate_is_taken)
++{
++   run([&]() -> Task<void> {
++      // neither trusted nor for this name
++      auto config = client_config();
++      config.tls_ca_file.clear();
++      config.tls_verify = false;
++      auto [ec, connection] = co_await quic::connect(
++         context.get_executor(), {server->local_endpoint()}, "anyhttp.example", config);
++      EXPECT_FALSE(ec) << ec.message();
++      EXPECT_TRUE(connection);
++   }());
++}
++
+ TEST_P(QuicStreams, WHEN_http3_is_on_the_same_port_THEN_both_work)
+ {
+    serverConnection = echo_streams;
 -- 
 2.53.0
 

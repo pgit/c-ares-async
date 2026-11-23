@@ -164,8 +164,9 @@ endif()
 #
 # anyhttp, for its QUIC. Pinned, as Capy and Corosio are, and patched with what DNS over QUIC needs
 # of quic::connect() and anyhttp does not have yet: connecting to an address while verifying the
-# certificate for a name given apart from it, and not verifying at all. As a subproject it is the
-# library and nothing else -- no tests, no programs, no install rules.
+# certificate for a name given apart from it, and not verifying at all -- which is
+# https://github.com/pgit/anyhttp/pull/50, to be dropped with the pin moving past it. As a
+# subproject it is the library and nothing else -- no tests, no programs, no install rules.
 #
 if (C_ARES_ASYNC_DOQ)
     if (NOT C_ARES_ASYNC_API STREQUAL "ASIO")
