@@ -39,6 +39,7 @@ namespace c_ares_async::inline C_ARES_ASYNC_RUNTIME
 namespace detail
 {
 class tls_transport;
+class quic_transport;
 } // namespace detail
 
 // --------------------------------------------------------------------------------------------------
@@ -145,7 +146,8 @@ public:
        them: in `/etc/resolv.conf` and what goes with it.
 
        With `tls.enabled`, every query goes out over DNS over TLS instead of
-       UDP or TCP in the clear, and the servers are asked on port 853.
+       UDP or TCP in the clear, and the servers are asked on port 853. With
+       `tls.quic` as well, it is DNS over QUIC instead, on the same port.
 
        @param executor Runs everything the resolver does, and every
        completion handler that has no executor of its own.
@@ -155,7 +157,9 @@ public:
        @par Exceptions
        @ref system_error where c-ares cannot be set up, with its status code
        as @ref make_ares_error makes it, and `std::runtime_error` where the
-       TLS library cannot.
+       TLS library cannot. @ref system_error with
+       `errc::operation_not_supported` for `tls.quic` where the library is
+       built without DNS over QUIC.
     */
    explicit resolver(executor_type executor, const tls_options& tls = {});
 
@@ -363,6 +367,13 @@ private:
    ares_channel_t* m_channel = nullptr;
    log_function m_logger; // declared ahead of the transport, which keeps a reference to it
    std::unique_ptr<detail::tls_transport> m_tls; // null unless DNS over TLS was asked for
+
+   //
+   // Null unless DNS over QUIC was asked for. A shared_ptr, as that is what can be destroyed where
+   // the type is incomplete: it is defined where C_ARES_ASYNC_DOQ is 1, and not otherwise, and the
+   // resolver is the same object either way.
+   //
+   std::shared_ptr<detail::quic_transport> m_quic;
    std::map<ares_socket_t, std::shared_ptr<socket_watch>> m_sockets;
 };
 

@@ -286,3 +286,21 @@ TEST_F(DnsOverTls, ReportsAServerThatIsNotThere)
    EXPECT_TRUE(ec);
    EXPECT_THAT(endpoints, IsEmpty());
 }
+
+#if !C_ARES_ASYNC_DOQ
+TEST_F(DnsOverTls, RefusesDnsOverQuicWhereItIsNotBuiltIn)
+{
+   //
+   // Not DNS over TLS in its place, nor anything else: what is asked for is not there.
+   //
+   try
+   {
+      c_ares_async::resolver quic(executor(), {.enabled = true, .quic = true});
+      ADD_FAILURE() << "a resolver for DNS over QUIC without it";
+   }
+   catch (const c_ares_async::system_error& error)
+   {
+      EXPECT_EQ(error.code(), c_ares_async::errc::operation_not_supported) << error.what();
+   }
+}
+#endif

@@ -17,6 +17,19 @@
 #include <boost/asio/use_awaitable.hpp>
 #include <boost/asio/write.hpp>
 
+#if C_ARES_ASYNC_DOQ
+#include <anyhttp/quic.hpp>
+#include <anyhttp/server.hpp>
+
+#include <spdlog/spdlog.h>
+
+#include <gtest/gtest.h>
+
+#include <cstdio>
+#include <fstream>
+#include <unistd.h>
+#endif
+
 #include <algorithm>
 #include <array>
 #include <cctype>
@@ -91,6 +104,18 @@ struct fake_dns_server::state
 
    template <typename Stream>
    static awaitable<void> serve_stream(std::shared_ptr<state> self, Stream& stream, transport via);
+
+#if C_ARES_ASYNC_DOQ
+   static awaitable<void> serve_quic(std::shared_ptr<state> self,
+                                     anyhttp::quic::Connection connection);
+   static awaitable<void> serve_quic_stream(std::shared_ptr<state> self,
+                                            anyhttp::quic::Stream stream);
+
+   std::optional<anyhttp::server::Server> quic;
+   bool quic_extra_message = false;
+   std::size_t quic_connections = 0;
+   std::vector<unsigned> quic_ids;
+#endif
 
    ip::udp::socket udp;
    ip::tcp::acceptor acceptor;
@@ -265,7 +290,20 @@ fake_dns_server::~fake_dns_server()
    error_code ignored;
    m_state->udp.close(ignored);
    m_state->acceptor.close(ignored);
+#if C_ARES_ASYNC_DOQ
+   m_state->quic.reset(); // stops listening, and ends every connection
+#endif
 }
+
+#if C_ARES_ASYNC_DOQ
+void fake_dns_server::shutdown()
+{
+   error_code ignored;
+   m_state->udp.close(ignored);
+   m_state->acceptor.close(ignored);
+   m_state->quic.reset();
+}
+#endif
 
 std::string fake_dns_server::address() const
 {
@@ -407,3 +445,111 @@ awaitable<void> fake_dns_server::state::serve_tcp(std::shared_ptr<state> self)
       co_spawn(self->acceptor.get_executor(), serve_connection(self, std::move(socket)), detached);
    }
 }
+
+// --------------------------------------------------------------------------------------------------
+
+#if C_ARES_ASYNC_DOQ
+
+void fake_dns_server::use_quic(const test_certificate& certificate,
+                               std::chrono::nanoseconds idle_timeout)
+{
+   //
+   // anyhttp has the defaults of a development server, and says so at the level of information:
+   // what it has to say about the client going wrong is a warning, and that is all the tests want
+   // to see of it.
+   //
+   spdlog::set_level(spdlog::level::warn);
+
+   //
+   // anyhttp reads its certificate from files, once, when the server is made.
+   //
+   const auto base = testing::TempDir() + "c_ares_async_doq_" + std::to_string(::getpid());
+   const auto chain = base + "_chain.pem", key = base + "_key.pem";
+   std::ofstream(chain) << certificate.certificate_pem;
+   std::ofstream(key) << certificate.key_pem;
+
+   m_state->quic.emplace(m_state->udp.get_executor(), anyhttp::server::Config{.listen_address = "127.0.0.1",
+                                                                 .port = 0,
+                                                                 .tls_certificate_chain = chain,
+                                                                 .tls_private_key = key,
+                                                                 .idle_timeout = idle_timeout});
+   std::remove(chain.c_str());
+   std::remove(key.c_str());
+
+   //
+   // The server keeps the handler, so the handler must not keep the state, which has the server.
+   //
+   m_state->quic->on_quic(
+      {.alpn = "doq"},
+      [weak = std::weak_ptr<state>(m_state)](anyhttp::quic::Connection connection) -> awaitable<void> {
+         if (auto self = weak.lock())
+            co_await state::serve_quic(std::move(self), std::move(connection));
+      });
+}
+
+std::string fake_dns_server::quic_address() const
+{
+   return "127.0.0.1:" + std::to_string(m_state->quic->local_endpoint().port());
+}
+
+void fake_dns_server::set_quic_extra_message(bool extra) { m_state->quic_extra_message = extra; }
+
+std::size_t fake_dns_server::quic_connections() const { return m_state->quic_connections; }
+
+const std::vector<unsigned>& fake_dns_server::quic_ids() const { return m_state->quic_ids; }
+
+//
+// RFC 9250: the client opens a stream for every query, and the server does nothing but answer on
+// it. The connection is over when the handler returns, so it waits for the client to end it.
+//
+awaitable<void> fake_dns_server::state::serve_quic(std::shared_ptr<state> self,
+                                                   anyhttp::quic::Connection connection)
+{
+   ++self->quic_connections;
+   for (;;)
+   {
+      auto [ec, stream] = co_await connection.accept_stream();
+      if (ec)
+         co_return;
+
+      co_spawn(connection.get_executor(), serve_quic_stream(self, std::move(stream)), detached);
+   }
+}
+
+awaitable<void> fake_dns_server::state::serve_quic_stream(std::shared_ptr<state> self,
+                                                          anyhttp::quic::Stream stream)
+{
+   std::vector<unsigned char> query;
+   std::array<unsigned char, 4096> buffer;
+   for (;;)
+   {
+      auto [ec, n] = co_await stream.read_some(boost::asio::buffer(buffer));
+      query.insert(query.end(), buffer.begin(), buffer.begin() + n);
+      if (ec == anyhttp::errors::eof)
+         break;
+      if (ec)
+         co_return;
+   }
+
+   if (query.size() < 2 + 12 || ((std::size_t{query[0]} << 8) | query[1]) != query.size() - 2)
+      co_return; // which resets the stream
+
+   self->quic_ids.push_back((unsigned{query[2]} << 8) | query[3]);
+
+   auto reply = self->answer({query.data() + 2, query.size() - 2}, transport::quic);
+   if (reply.empty())
+      co_return; // silent: no answer, and the stream reset
+
+   std::vector<unsigned char> framed{static_cast<unsigned char>(reply.size() >> 8),
+                                     static_cast<unsigned char>(reply.size() & 0xff)};
+   framed.insert(framed.end(), reply.begin(), reply.end());
+   if (self->quic_extra_message)
+   {
+      const auto copy = framed;
+      framed.insert(framed.end(), copy.begin(), copy.end());
+   }
+
+   std::ignore = co_await stream.write_eof(boost::asio::buffer(framed));
+}
+
+#endif // C_ARES_ASYNC_DOQ

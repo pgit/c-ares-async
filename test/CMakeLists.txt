@@ -48,6 +48,14 @@ else()
                                               asio/run.hpp)
 endif()
 
+#
+# DNS over QUIC, where the tests are on c_ares_async::doq: the fake server speaks it with anyhttp's
+# server, which comes with anyhttp along with the client.
+#
+if (TARGET c_ares_async::doq)
+    target_sources(c_ares_async_tests PRIVATE quic_test.cpp)
+endif()
+
 target_compile_definitions(c_ares_async_tests PRIVATE BOOST_ASIO_NO_DEPRECATED)
 
 #
@@ -60,7 +68,7 @@ endif()
 
 # the fake server speaks TLS as well, with the same library the resolver links
 target_link_libraries(
-    c_ares_async_tests PRIVATE c_ares_async::${c_ares_async_runtime} Boost::headers GTest::gmock
+    c_ares_async_tests PRIVATE ${c_ares_async_target} Boost::headers GTest::gmock
                                GTest::gtest_main ${c_ares_async_tls_libraries} Threads::Threads)
 
 #
@@ -70,7 +78,7 @@ target_link_libraries(
 #
 add_library(c_ares_async_test_shared_library SHARED shared_library.cpp shared_library.hpp)
 target_link_libraries(c_ares_async_test_shared_library
-                      PRIVATE c_ares_async::${c_ares_async_runtime})
+                      PRIVATE ${c_ares_async_target})
 target_compile_definitions(c_ares_async_test_shared_library PRIVATE BOOST_ASIO_NO_DEPRECATED)
 set_target_properties(c_ares_async_test_shared_library PROPERTIES CXX_VISIBILITY_PRESET hidden
                                                                   VISIBILITY_INLINES_HIDDEN ON)
@@ -140,7 +148,7 @@ foreach (header IN LISTS c_ares_async_header_set)
 endforeach()
 
 add_library(c_ares_async_header_test OBJECT EXCLUDE_FROM_ALL ${c_ares_async_header_sources})
-target_link_libraries(c_ares_async_header_test PRIVATE c_ares_async::${c_ares_async_runtime})
+target_link_libraries(c_ares_async_header_test PRIVATE ${c_ares_async_target})
 target_compile_definitions(c_ares_async_header_test PRIVATE BOOST_ASIO_NO_DEPRECATED)
 
 set_property(GLOBAL APPEND PROPERTY JOB_POOLS c_ares_async_header_test=4)

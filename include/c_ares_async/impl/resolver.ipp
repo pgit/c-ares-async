@@ -7,6 +7,7 @@
 #include <c_ares_async/detail/log.hpp>
 #include <c_ares_async/detail/server_list.hpp>
 #include <c_ares_async/detail/socket_functions.hpp>
+#include <c_ares_async/detail/quic_transport.hpp>
 #include <c_ares_async/detail/tls_transport.hpp>
 #include <c_ares_async/resolver.hpp> // NOLINT(misc-header-include-cycle)
 
@@ -305,7 +306,8 @@ inline resolver::resolver(executor_type executor, const tls_options& tls)
    //
    // DNS over TLS is DNS over TCP with a TLS session under it, so UDP is off the table
    // (ARES_FLAG_USEVC). Keeping the connection up once the queries drain is worth a lot more here
-   // than it is for plain TCP: it is a handshake per name otherwise.
+   // than it is for plain TCP: it is a handshake per name otherwise. DNS over QUIC is DNS over
+   // TCP as far as c-ares is concerned, see quic_transport.hpp, so the same goes for that.
    //
    if (tls.enabled)
    {
@@ -322,7 +324,21 @@ inline resolver::resolver(executor_type executor, const tls_options& tls)
       if (int status = ares_init_options(&m_channel, &options, optmask); status != ARES_SUCCESS)
          throw system_error(make_ares_error(status), "ares_init_options");
 
-      if (tls.enabled)
+      if (tls.enabled && tls.quic)
+      {
+#if C_ARES_ASYNC_DOQ && C_ARES_ASYNC_ASIO
+         m_quic = std::make_shared<detail::quic_transport>(m_executor, tls, m_logger);
+         m_quic->install(m_channel); // before the channel has had a chance to open anything
+
+         // RFC 9250, section 4.1.1: UDP port 853, which is the port of DNS over TLS as well
+         if (auto status = detail::set_port(m_channel, 853); status != ARES_SUCCESS)
+            throw system_error(make_ares_error(static_cast<int>(status)), "ares_set_servers_csv");
+#else
+         throw system_error(make_error_code(errc::operation_not_supported),
+                            "DNS over QUIC is not built in, see C_ARES_ASYNC_DOQ");
+#endif
+      }
+      else if (tls.enabled)
       {
          m_tls = std::make_unique<detail::tls_transport>(tls, m_logger);
          m_tls->install(m_channel); // before the channel has had a chance to open anything
@@ -357,10 +373,11 @@ inline resolver::resolver(executor_type executor, const tls_options& tls)
 inline error_code resolver::set_servers(std::string_view servers)
 {
    //
-   // For DNS over TLS the port to assume is 853, where the list does not name one. A port that
-   // it does name is taken at face value.
+   // For DNS over TLS and DNS over QUIC the port to assume is 853, where the list does not name
+   // one. A port that it does name is taken at face value.
    //
-   const auto list = m_tls ? detail::with_port(servers, 853, false) : std::string(servers);
+   const auto list =
+      m_tls || m_quic ? detail::with_port(servers, 853, false) : std::string(servers);
    if (list.empty())
       return {};
 

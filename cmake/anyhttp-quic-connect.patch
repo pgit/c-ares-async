@@ -1,0 +1,213 @@
+From a847678226ea065444a589367715cc64e0b51b01 Mon Sep 17 00:00:00 2001
+From: Peter Eisenlohr <peter-claude@eisenlohr.org>
+Date: Mon, 23 Nov 2026 21:56:55 +0000
+Subject: [PATCH] quic::connect() to endpoints, verifying for a name of their
+ own, or not at all
+
+A client that knows the address of its server already, and the server's name apart from that --
+DNS over QUIC, where the server list has addresses only -- connects with the endpoints and the
+name the certificate has to be valid for. An empty name checks the chain only and sends no SNI.
+Config::tls_verify turns verification off, for testing.
+
+Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>
+---
+ include/anyhttp/quic.hpp        | 19 +++++++++++++
+ include/anyhttp/quic/client.hpp |  4 +++
+ src/quic/client.cpp             | 18 ++++++++----
+ src/quic/connection.cpp         | 49 ++++++++++++++++++++++++++++-----
+ 4 files changed, 78 insertions(+), 12 deletions(-)
+
+diff --git a/include/anyhttp/quic.hpp b/include/anyhttp/quic.hpp
+index 57862ee..9e26d8b 100644
+--- a/include/anyhttp/quic.hpp
++++ b/include/anyhttp/quic.hpp
+@@ -33,6 +33,7 @@
+ #include <functional>
+ #include <memory>
+ #include <string>
++#include <vector>
+ 
+ namespace anyhttp::quic
+ {
+@@ -53,6 +54,12 @@ struct Config
+     */
+    std::string tls_ca_file;
+ 
++   /**
++    * Client: whether the server's certificate is verified at all. Without it, any certificate is
++    * taken, from anybody who answers in the server's place -- that is for testing.
++    */
++   bool tls_verify = true;
++
+    /**
+     * Client: how long the connection may be silent. The server's is server::Config::idle_timeout.
+     */
+@@ -268,6 +275,18 @@ using ConnectHandler = Completion<Connect>;
+ /// \return The error and the connection.
+ IoTask<Connection> connect(Executor executor, std::string host, std::string port, Config config);
+ 
++/// Connects to the first of \p endpoints that gets there, negotiating \c config.alpn, and returns
++/// the connection -- for a client that knows the server's address already, and its name apart
++/// from that. The server's certificate has to be valid for \p host, which is also sent as SNI if
++/// it is a name; an empty \p host checks the chain only, and sends no SNI.
++/// \param executor What the connection runs on.
++/// \param endpoints Where the server is, tried one after the other.
++/// \param host The name or address the server's certificate has to be valid for, or empty.
++/// \param config The protocol, and how to speak it.
++/// \return The error and the connection.
++IoTask<Connection> connect(Executor executor, std::vector<TcpEndpoint> endpoints, std::string host,
++                           Config config);
++
+ #if ANYHTTP_ASIO
+ /// \cond internal
+ void async_connect_any(Executor executor, std::string host, std::string port, Config config,
+diff --git a/include/anyhttp/quic/client.hpp b/include/anyhttp/quic/client.hpp
+index b3dc622..dbfad5d 100644
+--- a/include/anyhttp/quic/client.hpp
++++ b/include/anyhttp/quic/client.hpp
+@@ -25,11 +25,15 @@ struct ClientConfig
+    std::string alpn;
+ 
+    /// The host the server's certificate has to be valid for: a name, sent as SNI, or an address.
++   /// Empty checks the chain only, and sends no SNI.
+    std::string host;
+ 
+    /// The CA certificates to verify the server with, see client::Config::tls_ca_file.
+    std::string tls_ca_file;
+ 
++   /// Whether the server's certificate is verified at all, see Config::tls_verify.
++   bool verify = true;
++
+    /// How long the connection may be silent before it is considered dead.
+    std::chrono::nanoseconds idle_timeout = std::chrono::seconds{30};
+ };
+diff --git a/src/quic/client.cpp b/src/quic/client.cpp
+index 22438a7..adc25f4 100644
+--- a/src/quic/client.cpp
++++ b/src/quic/client.cpp
+@@ -89,8 +89,13 @@ struct TlsClientContext
+       SSL_CTX_set_alpn_protos(ctx, reinterpret_cast<const unsigned char*>(alpn.data()),
+                               static_cast<unsigned int>(alpn.size()));
+ 
+-      tls_load_trusted_cas(ctx, config.tls_ca_file);
+-      SSL_CTX_set_verify(ctx, SSL_VERIFY_PEER, nullptr);
++      if (config.verify)
++      {
++         tls_load_trusted_cas(ctx, config.tls_ca_file);
++         SSL_CTX_set_verify(ctx, SSL_VERIFY_PEER, nullptr);
++      }
++      else
++         SSL_CTX_set_verify(ctx, SSL_VERIFY_NONE, nullptr);
+    }
+ 
+    ~TlsClientContext()
+@@ -244,7 +249,9 @@ int QuicClientSession::init(UdpEndpoint remote, const ClientConfig& config,
+    // The certificate has to be valid for the origin, the host of the URL -- also when `remote` is
+    // an alternative service it advertised (RFC 7838, section 2.1).
+    //
+-   if (!tls_set_peer_name(ssl_, config.host))
++   // An empty host leaves the chain to be checked, and nothing to send as SNI.
++   //
++   if (!config.host.empty() && !tls_set_peer_name(ssl_, config.host))
+    {
+       mloge("init: can't verify certificates for '{}'", config.host);
+       return -1;
+@@ -352,8 +359,9 @@ void QuicClientSession::signal_ready() { ready_.set(); }
+ 
+ int QuicClientSession::handle_error(int /*rv*/)
+ {
+-   // X509_V_ERR_INVALID_CALL: the handshake never got as far as verifying anything
+-   if (ssl_)
++   // X509_V_ERR_INVALID_CALL: the handshake never got as far as verifying anything. Without
++   // verification there is a result all the same, but nothing was decided by it.
++   if (ssl_ && SSL_get_verify_mode(ssl_) != SSL_VERIFY_NONE)
+       if (auto result = SSL_get_verify_result(ssl_);
+           result != X509_V_OK && result != X509_V_ERR_INVALID_CALL)
+          mlogw("server certificate: {}", X509_verify_cert_error_string(result));
+diff --git a/src/quic/connection.cpp b/src/quic/connection.cpp
+index 47e946b..3736371 100644
+--- a/src/quic/connection.cpp
++++ b/src/quic/connection.cpp
+@@ -10,7 +10,9 @@
+ #include <boost/system/detail/errc.hpp>
+ 
+ #include <memory>
++#include <type_traits>
+ #include <utility>
++#include <vector>
+ 
+ namespace anyhttp::quic
+ {
+@@ -162,7 +164,14 @@ void Connection::reset() noexcept { impl_.reset(); }
+ // connect()
+ // =================================================================================================
+ 
+-IoTask<Connection> connect(Executor executor, std::string host, std::string port, Config config)
++namespace
++{
++
++//
++// What connect() makes of either the endpoints it is given or the ones it looks up.
++//
++template <typename Target>
++IoTask<Connection> connect_to(Executor executor, Target target, std::string host, Config config)
+ {
+    if (config.alpn.empty() || config.alpn.size() > 255)
+       co_return std::tuple{make_error_code(errc::invalid_argument), Connection{}};
+@@ -170,14 +179,25 @@ IoTask<Connection> connect(Executor executor, std::string host, std::string port
+    try
+    {
+       ClientConfig client_config{.alpn = config.alpn,
+-                                 .host = host,
++                                 .host = std::move(host),
+                                  .tls_ca_file = config.tls_ca_file,
++                                 .verify = config.tls_verify,
+                                  .idle_timeout = config.idle_timeout};
+-      auto session = co_await async_connect(
+-         std::move(executor), std::move(host), std::move(port), std::move(client_config),
+-         [config](QuicSession& s) -> std::unique_ptr<QuicApplication> {
+-            return std::make_unique<StreamApplication>(s, config, nullptr);
+-         });
++      auto factory = [config](QuicSession& s) -> std::unique_ptr<QuicApplication> {
++         return std::make_unique<StreamApplication>(s, config, nullptr);
++      };
++
++      std::shared_ptr<QuicSession> session;
++      if constexpr (std::is_same_v<Target, std::vector<TcpEndpoint>>)
++         session = co_await async_connect(std::move(executor), std::move(target),
++                                          std::move(client_config), std::move(factory));
++      else
++      {
++         auto host_to_resolve = client_config.host;
++         session = co_await async_connect(std::move(executor), std::move(host_to_resolve),
++                                          std::move(target), std::move(client_config),
++                                          std::move(factory));
++      }
+ 
+       auto& application = static_cast<StreamApplication&>(*session->application());
+       co_return std::tuple{error_code{},
+@@ -189,6 +209,21 @@ IoTask<Connection> connect(Executor executor, std::string host, std::string port
+    }
+ }
+ 
++} // namespace
++
++IoTask<Connection> connect(Executor executor, std::string host, std::string port, Config config)
++{
++   co_return co_await connect_to(std::move(executor), std::move(port), std::move(host),
++                                 std::move(config));
++}
++
++IoTask<Connection> connect(Executor executor, std::vector<TcpEndpoint> endpoints, std::string host,
++                           Config config)
++{
++   co_return co_await connect_to(std::move(executor), std::move(endpoints), std::move(host),
++                                 std::move(config));
++}
++
+ #if ANYHTTP_ASIO
+ void async_connect_any(Executor executor, std::string host, std::string port, Config config,
+                        ConnectHandler&& handler)
+-- 
+2.53.0
+

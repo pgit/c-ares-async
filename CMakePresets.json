@@ -86,6 +86,20 @@
             }
         },
         {
+            "name": "doq",
+            "displayName": "DNS over QUIC",
+            "description": "A debug build against AWS-LC with DNS over QUIC, in build-doq/: anyhttp is fetched at the commit CMakeLists.txt pins, and built for its QUIC",
+            "inherits": [
+                "devcontainer",
+                "aws-lc"
+            ],
+            "binaryDir": "${sourceDir}/build-doq",
+            "cacheVariables": {
+                "CMAKE_BUILD_TYPE": "Debug",
+                "C_ARES_ASYNC_DOQ": "ON"
+            }
+        },
+        {
             "name": "openssl",
             "displayName": "OpenSSL",
             "description": "The system's OpenSSL instead of AWS-LC",
@@ -156,6 +170,10 @@
             "configurePreset": "tsan"
         },
         {
+            "name": "doq",
+            "configurePreset": "doq"
+        },
+        {
             "name": "openssl",
             "configurePreset": "openssl"
         },
@@ -198,6 +216,11 @@
         {
             "name": "tsan",
             "configurePreset": "tsan",
+            "inherits": "base"
+        },
+        {
+            "name": "doq",
+            "configurePreset": "doq",
             "inherits": "base"
         },
         {

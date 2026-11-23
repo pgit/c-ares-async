@@ -16,7 +16,9 @@ number of lookups in flight at once, and more to ask for than addresses:
 * **HTTPS records** ([RFC 9460](https://www.rfc-editor.org/rfc/rfc9460)), which tell a client
   which protocols an endpoint speaks before it connects;
 * over UDP and TCP, or over **DNS over TLS** ([RFC 7858](https://www.rfc-editor.org/rfc/rfc7858)),
-  which c-ares has no transport for by itself;
+  which c-ares has no transport for by itself -- and, where it is built with
+  [anyhttp](https://github.com/pgit/anyhttp)'s QUIC, over **DNS over QUIC**
+  ([RFC 9250](https://www.rfc-editor.org/rfc/rfc9250));
 * as operations that take any completion token -- `use_awaitable`, `deferred`, `use_future`, a
   callback -- and can be cancelled.
 
@@ -146,6 +148,7 @@ include those of the TLS library, which is how they tell OpenSSL and AWS-LC apar
 | --- | --- | --- |
 | `C_ARES_ASYNC_API` | `ASIO` | The I/O runtime to build the tests and examples on, `ASIO` or `COROSIO`, see [doc/corosio.rst](doc/corosio.rst). A COROSIO build fetches Capy and Corosio, unless they are there already. The runtime targets are there wherever their runtime is, whichever this is. |
 | `C_ARES_ASYNC_TLS` | `OpenSSL` | The TLS library that the targets link, `OpenSSL` or `AWS-LC`. `ssl_ROOT` says where the latter is installed. |
+| `C_ARES_ASYNC_DOQ` | `OFF` | Adds DNS over QUIC: fetches and builds anyhttp, for its QUIC, and makes the target `c_ares_async::doq`, which the tests and examples then link. Asio only, and not installed. See [doc/dns-over-quic.rst](doc/dns-over-quic.rst). |
 | `C_ARES_ASYNC_BUILD_TESTS` | top-level only | Builds the tests. Also off where `BUILD_TESTING` is. |
 | `C_ARES_ASYNC_BUILD_EXAMPLES` | top-level only | Builds the examples. |
 | `C_ARES_ASYNC_BUILD_DOCS` | top-level only | Builds the code of the guide, and adds the `docs` target where there is a `doxygen` and a `sphinx-build` to make them with. |
@@ -204,6 +207,7 @@ lookup on Asio into the same program as the ones on Corosio.
 * [The Corosio runtime](doc/corosio.rst): the second runtime, and what porting to it found.
 * [HTTPS records](doc/https-records.rst)
 * [DNS over TLS](doc/dns-over-tls.rst)
+* [DNS over QUIC](doc/dns-over-quic.rst)
 
 ## Good to know
 
