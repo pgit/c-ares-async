@@ -162,11 +162,12 @@ else()
 endif()
 
 #
-# anyhttp, for its QUIC. Pinned, as Capy and Corosio are, and patched with what DNS over QUIC needs
-# of quic::connect() and anyhttp does not have yet: connecting to an address while verifying the
-# certificate for a name given apart from it, and not verifying at all -- which is
-# https://github.com/pgit/anyhttp/pull/50, to be dropped with the pin moving past it. As a
-# subproject it is the library and nothing else -- no tests, no programs, no install rules.
+# anyhttp, for its QUIC. Pinned, as Capy and Corosio are: at the merge of
+# https://github.com/pgit/anyhttp/pull/50, which is what DNS over QUIC needs of quic::connect() --
+# connecting to an address while verifying the certificate for a name given apart from it, and not
+# verifying at all. It fetches Capy and Boost.HTTP in turn, which its HTTP/1.1 is built on, at pins
+# of its own. As a subproject it is the library and nothing else -- no tests, no programs, no
+# install rules.
 #
 if (C_ARES_ASYNC_DOQ)
     if (NOT C_ARES_ASYNC_API STREQUAL "ASIO")
@@ -184,9 +185,7 @@ if (C_ARES_ASYNC_DOQ)
         FetchContent_Declare(
             anyhttp
             GIT_REPOSITORY https://github.com/pgit/anyhttp.git
-            GIT_TAG 3b4b0c5e0e4c005a60838f1725de8920881802a0
-            PATCH_COMMAND git apply "${CMAKE_CURRENT_SOURCE_DIR}/cmake/anyhttp-quic-connect.patch"
-            UPDATE_DISCONNECTED ON
+            GIT_TAG 3d4c47aae9c695afa5939ac3398646375d69ec4b
             EXCLUDE_FROM_ALL)
         FetchContent_MakeAvailable(anyhttp)
     endif()

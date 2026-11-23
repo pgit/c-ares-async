@@ -11,7 +11,8 @@ QUIC either; the library takes `anyhttp <https://github.com/pgit/anyhttp>`__'s, 
 QUIC streams next to HTTP/3, on ngtcp2.
 
 It is not there by default. ``-DC_ARES_ASYNC_DOQ=ON`` fetches and builds anyhttp, at the commit
-:src:`CMakeLists.txt` pins, and makes the target ``c_ares_async::doq``: ``c_ares_async::asio``
+:src:`CMakeLists.txt` pins -- and with it Capy and Boost.HTTP, which anyhttp's HTTP/1.1 is built on,
+at pins of anyhttp's -- and makes the target ``c_ares_async::doq``: ``c_ares_async::asio``
 with anyhttp and ``C_ARES_ASYNC_DOQ=1``. A resolver from a translation unit compiled with that
 takes :cpp:member:`tls_options::quic`:
 
@@ -72,25 +73,21 @@ closed the socket.
 What anyhttp needed
 -------------------
 
-anyhttp's ``quic::connect()`` resolves the host it is given and checks the certificate against
-that same host, which is the wrong way round for a resolver: c-ares has the server's address and
-nothing else, and the name comes from :cpp:member:`tls_options::hostname`. Nor could the check be
-turned off. :src:`cmake/anyhttp-quic-connect.patch` adds both to anyhttp, and is applied to the
-commit that is fetched:
+anyhttp's ``quic::connect()`` used to resolve the host it was given and check the certificate
+against that same host, which is the wrong way round for a resolver: c-ares has the server's
+address and nothing else, and the name comes from :cpp:member:`tls_options::hostname`. Nor could the
+check be turned off. `anyhttp#50 <https://github.com/pgit/anyhttp/pull/50>`__ added both, and the
+pin is at its merge:
 
 * ``quic::connect(executor, endpoints, host, config)``, to the endpoints given, with the
   certificate checked for ``host`` -- or the chain alone, and no SNI, for an empty one;
 * ``quic::Config::tls_verify``.
 
-The patch is `anyhttp#50 <https://github.com/pgit/anyhttp/pull/50>`__, tests and documentation
-included. Until that is merged, the pin and the patch go together; once it is, the pin moves past it
-and the patch goes.
-
 What is not there
 -----------------
 
-* **Corosio.** anyhttp's runtime is chosen when it is built, and an anyhttp built for Corosio pins
-  Capy and Corosio at other commits than this library does, and needs OpenSSL 3.5. DoQ is for
+* **Corosio.** anyhttp's runtime is chosen when it is built, and anyhttp pins Capy, and for
+  Corosio Corosio as well, at other commits than this library does, and needs OpenSSL 3.5 there. DoQ is for
   ``C_ARES_ASYNC_API=ASIO`` only.
 * **Installing.** ``c_ares_async::doq`` is not installed, as anyhttp is built as part of this build
   and not installed with it.
