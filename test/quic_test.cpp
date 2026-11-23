@@ -220,7 +220,8 @@ TEST_F(DnsOverQuic, KeepsTheConnectionForTheNextQuestion)
       EXPECT_FALSE(ec) << ec.message();
    }
 
-   EXPECT_EQ(server.quic_connections(), 1u) << "a handshake per name is what this is there to avoid";
+   EXPECT_EQ(server.quic_connections(), 1u)
+      << "a handshake per name is what this is there to avoid";
 }
 
 TEST_F(DnsOverQuic, SendsAddressAndHttpsQueriesDownOneConnection)
@@ -319,8 +320,8 @@ TEST_F(DnsOverQuic, LetsGoOfAConnectionBeingMadeWhenDestroyed)
    //
    boost::asio::ip::udp::socket black_hole(server_executor(),
                                            {boost::asio::ip::address_v4::loopback(), 0});
-   ASSERT_FALSE(resolver->set_servers("127.0.0.1:" +
-                                      std::to_string(black_hole.local_endpoint().port())));
+   ASSERT_FALSE(
+      resolver->set_servers("127.0.0.1:" + std::to_string(black_hole.local_endpoint().port())));
 
    std::optional<std::tuple<error_code, c_ares_async::resolver::results_type>> result;
    start([](c_ares_async::resolver& resolver, auto& result) -> c_ares_async::Task<void> {

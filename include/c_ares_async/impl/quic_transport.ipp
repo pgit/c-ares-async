@@ -62,8 +62,8 @@ class quic_transport::bridge : public std::enable_shared_from_this<bridge>
 public:
    bridge(const Executor& executor, ares_socket_t fd, int domain, int peer,
           const tls_options& options, const log_function& logger)
-      : m_executor(executor), m_fd(fd), m_domain(domain), m_socket(executor),
-        m_options(options), m_logger(&logger)
+      : m_executor(executor), m_fd(fd), m_domain(domain), m_socket(executor), m_options(options),
+        m_logger(&logger)
    {
       m_socket.assign(boost::asio::local::stream_protocol(), peer);
    }

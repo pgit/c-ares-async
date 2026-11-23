@@ -295,7 +295,7 @@ void on_many_threads(boost::corosio::io_context& context)
 {
    const auto strand = boost::capy::strand(context.get_executor());
 
-   boost::capy::run_async(strand)([]() -> c_ares_async::Task<void>{
+   boost::capy::run_async(strand)([]() -> c_ares_async::Task<void> {
       auto strand = co_await boost::capy::this_coro::executor;
       c_ares_async::resolver resolver(strand);
       co_await print_addresses(resolver, "example.com");

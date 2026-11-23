@@ -5,9 +5,9 @@
 
 #include <c_ares_async/detail/event_loop.hpp>
 #include <c_ares_async/detail/log.hpp>
+#include <c_ares_async/detail/quic_transport.hpp>
 #include <c_ares_async/detail/server_list.hpp>
 #include <c_ares_async/detail/socket_functions.hpp>
-#include <c_ares_async/detail/quic_transport.hpp>
 #include <c_ares_async/detail/tls_transport.hpp>
 #include <c_ares_async/resolver.hpp> // NOLINT(misc-header-include-cycle)
 

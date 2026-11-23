@@ -468,23 +468,24 @@ void fake_dns_server::use_quic(const test_certificate& certificate,
    std::ofstream(chain) << certificate.certificate_pem;
    std::ofstream(key) << certificate.key_pem;
 
-   m_state->quic.emplace(m_state->udp.get_executor(), anyhttp::server::Config{.listen_address = "127.0.0.1",
-                                                                 .port = 0,
-                                                                 .tls_certificate_chain = chain,
-                                                                 .tls_private_key = key,
-                                                                 .idle_timeout = idle_timeout});
+   m_state->quic.emplace(m_state->udp.get_executor(),
+                         anyhttp::server::Config{.listen_address = "127.0.0.1",
+                                                 .port = 0,
+                                                 .tls_certificate_chain = chain,
+                                                 .tls_private_key = key,
+                                                 .idle_timeout = idle_timeout});
    std::remove(chain.c_str());
    std::remove(key.c_str());
 
    //
    // The server keeps the handler, so the handler must not keep the state, which has the server.
    //
-   m_state->quic->on_quic(
-      {.alpn = "doq"},
-      [weak = std::weak_ptr<state>(m_state)](anyhttp::quic::Connection connection) -> awaitable<void> {
-         if (auto self = weak.lock())
-            co_await state::serve_quic(std::move(self), std::move(connection));
-      });
+   m_state->quic->on_quic({.alpn = "doq"},
+                          [weak = std::weak_ptr<state>(m_state)](
+                             anyhttp::quic::Connection connection) -> awaitable<void> {
+                             if (auto self = weak.lock())
+                                co_await state::serve_quic(std::move(self), std::move(connection));
+                          });
 }
 
 std::string fake_dns_server::quic_address() const

@@ -267,7 +267,8 @@ std::expected<Config, int> parseConfig(int argc, char* argv[])
    {
       if (config.native)
       {
-         std::cerr << std::format("{} is not supported by {}", transport, app::native_resolver::name)
+         std::cerr << std::format("{} is not supported by {}", transport,
+                                  app::native_resolver::name)
                    << '\n'
                    << desc;
          return std::unexpected(EXIT_FAILURE);
