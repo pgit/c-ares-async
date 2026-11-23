@@ -17,6 +17,8 @@
 
 #include <c_ares_async/resolver.hpp>
 
+#include <ares.h>
+
 #include <algorithm>
 #include <cctype>
 #include <cerrno>
@@ -196,6 +198,9 @@ std::expected<Config, int> parseConfig(int argc, char* argv[])
    opts("dot,t", po::bool_switch(&config.tls.enabled),
         "use DNS over TLS (RFC 7858) -- forces TCP and moves the servers to port 853 (c-ares "
         "only)");
+   opts("doq,q", po::bool_switch(&config.tls.quic),
+        "use DNS over QUIC (RFC 9250) instead -- on UDP port 853, with --tls-hostname and "
+        "--tls-no-verify as for --dot (c-ares only, and a build with C_ARES_ASYNC_DOQ)");
    opts("tls-hostname", po::value(&config.tls.hostname),
         "server name to use for SNI and to verify the certificate against, e.g. "
         "one.one.one.one -- a host name given as --server is used unless told otherwise");
@@ -254,11 +259,16 @@ std::expected<Config, int> parseConfig(int argc, char* argv[])
       return std::unexpected(EXIT_FAILURE);
    }
 
+   // DNS over QUIC is the other encrypted transport, and takes what DNS over TLS does
+   config.tls.enabled = config.tls.enabled || config.tls.quic;
+   const std::string_view transport = config.tls.quic ? "--doq" : "--dot";
+
    if (config.tls.enabled)
    {
       if (config.native)
       {
-         std::cerr << std::format("--dot is not supported by {}", app::native_resolver::name)
+         std::cerr << std::format("{} is not supported by {}", transport,
+                                  app::native_resolver::name)
                    << '\n'
                    << desc;
          return std::unexpected(EXIT_FAILURE);
@@ -279,9 +289,10 @@ std::expected<Config, int> parseConfig(int argc, char* argv[])
          }
          else if (config.tls.verify)
          {
-            std::cerr << (names.empty() ? "--dot needs a name to verify the server certificate "
+            std::cerr << transport
+                      << (names.empty() ? " needs a name to verify the server certificate "
                                           "against: a host name as --server, or --tls-hostname"
-                                        : "--server names several hosts, so --dot needs "
+                                        : ": --server names several hosts, so it needs "
                                           "--tls-hostname to verify their certificates against")
                       << ", or --tls-no-verify to skip the check\n"
                       << desc;
@@ -291,7 +302,7 @@ std::expected<Config, int> parseConfig(int argc, char* argv[])
    }
    else if (!config.tls.hostname.empty() || !config.tls.verify)
    {
-      std::cerr << "--tls-hostname and --tls-no-verify only apply with --dot\n" << desc;
+      std::cerr << "--tls-hostname and --tls-no-verify only apply with --dot or --doq\n" << desc;
       return std::unexpected(EXIT_FAILURE);
    }
 
@@ -722,17 +733,36 @@ int main(int argc, char* argv[])
    spdlog::set_pattern("%H:%M:%S.%e %^%l%$ %v");
    spdlog::set_level(config->verbose ? spdlog::level::debug : spdlog::level::info);
 
-   app::Context context;
-   const auto executor = app::executor_of(context);
+   //
+   // c-ares' library initialization is the program's to do, not the resolver's: once, before any
+   // other c-ares function and before the program has a thread besides this one, and the cleanup
+   // once they are all gone again. Linux would do without, but that is what c-ares asks for, see
+   // https://linux.die.net/man/3/ares_library_init.
+   //
+   if (const int status = ares_library_init(ARES_LIB_INIT_ALL); status != ARES_SUCCESS)
+   {
+      spdlog::error("ares_library_init: {}", ares_strerror(status));
+      return EXIT_FAILURE;
+   }
 
    //
-   // Ctrl-C cancels the lookups instead of stopping the event loop, so that everything gets a
-   // chance to unwind -- the pending request belongs to c-ares, the loop knows nothing about it.
+   // The context is gone before the cleanup, and with it the threads it has besides this one:
+   // Corosio's pool, and the one of Asio's resolver for --native.
    //
-   app::run_main(context,
-                 config->native ? resolveWithNative(executor, *config)
-                                : resolveWithAres(executor, *config),
-                 config->verbose);
+   {
+      app::Context context;
+      const auto executor = app::executor_of(context);
 
+      //
+      // Ctrl-C cancels the lookups instead of stopping the event loop, so that everything gets a
+      // chance to unwind -- the pending request belongs to c-ares, the loop knows nothing about it.
+      //
+      app::run_main(context,
+                    config->native ? resolveWithNative(executor, *config)
+                                   : resolveWithAres(executor, *config),
+                    config->verbose);
+   }
+
+   ares_library_cleanup();
    return EXIT_SUCCESS;
 }

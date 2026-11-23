@@ -291,16 +291,54 @@ happens to what is in flight, and why.
 Threads
 -------
 
-A resolver is for one thread at a time. Where the context runs on several, make its executor a
-strand and call it from inside that strand:
+A resolver is an I/O object like any other of its runtime: **any number of resolvers may be in use
+at the same time, on whichever threads, but each of them is for one thread at a time.**
+
+That is about more than the calls a program makes. A resolver also works on its own, whenever one of
+its sockets is ready or its timer expires, and it does so on its executor. On a context that one
+thread runs, nothing more is needed. Where the context runs on several, make the executor of the
+resolver a strand, and use the resolver from inside that strand only:
+
+* **Start the lookups from a coroutine on the strand.** That is where the coroutine resumes, too.
+* **Cancel them from there.** A cancellation calls into the resolver on the thread that sends it:
+  the one that emits the cancellation signal on Asio, the one that requests the stop on Corosio.
+  So it has to come from a timer or a coroutine on the same strand, not from another thread.
+* **Configure the resolver there**, with :cpp:func:`resolver::set_servers` and
+  :cpp:func:`resolver::set_logger`. The logger is called from inside the strand.
+* **Destroy it there**, or once the threads are through. Making it before the threads start is
+  fine as well.
+
+On Asio, the strand is the executor of the coroutine, and with it that of the resolver:
 
 .. literalinclude:: snippets.cpp
    :language: cpp
    :start-after: // [strand]
    :end-before: // [strand-end]
 
-This is tested on Asio. On Corosio a resolver on a ``capy::strand`` should stay on it, but
-nothing here runs it that way yet.
+On Corosio, the resolver takes a ``capy::strand`` as it is. The :cpp:type:`Executor` there is a
+``capy::any_executor``, which takes no strand, so this is a constructor of its own, see
+:ref:`corosio-constraints`:
+
+.. literalinclude:: snippets.cpp
+   :language: cpp
+   :start-after: // [strand-corosio]
+   :end-before: // [strand-corosio-end]
+
+The other way of putting threads to work needs no strand: a context for every thread, run by that
+thread alone, and a resolver of its own on each.
+
+c-ares has a library initialization of its own, ``ares_library_init()`` and
+``ares_library_cleanup()``, neither of which is thread safe. They are the program's to call, not the
+resolver's, which calls neither: ``ares_library_init()`` once before any other c-ares function and
+before the program starts any other thread, and ``ares_library_cleanup()`` once it has ended them
+all, as `the c-ares documentation <https://linux.die.net/man/3/ares_library_init>`__ says -- the
+threads of the context included, so the context goes first. On Linux, c-ares does without them, but
+``main()`` in :src:`example/resolve/main.cpp` calls them all the same.
+
+:src:`test/threads_test.cpp` does all of this, on both runtimes and over UDP as well as TLS: one
+resolver on a strand of a context that four threads run, with the lookups of eight coroutines in
+flight at once; sixteen resolvers on such a context, each on a strand of its own; and a context per
+thread. The ``tsan`` preset runs it with the thread sanitizer.
 
 Pseudo code for looking up many names
 -------------------------------------

@@ -16,7 +16,9 @@ number of lookups in flight at once, and more to ask for than addresses:
 * **HTTPS records** ([RFC 9460](https://www.rfc-editor.org/rfc/rfc9460)), which tell a client
   which protocols an endpoint speaks before it connects;
 * over UDP and TCP, or over **DNS over TLS** ([RFC 7858](https://www.rfc-editor.org/rfc/rfc7858)),
-  which c-ares has no transport for by itself;
+  which c-ares has no transport for by itself -- and, where it is built with
+  [anyhttp](https://github.com/pgit/anyhttp)'s QUIC, over **DNS over QUIC**
+  ([RFC 9250](https://www.rfc-editor.org/rfc/rfc9250));
 * as operations that take any completion token -- `use_awaitable`, `deferred`, `use_future`, a
   callback -- and can be cancelled.
 
@@ -146,6 +148,7 @@ include those of the TLS library, which is how they tell OpenSSL and AWS-LC apar
 | --- | --- | --- |
 | `C_ARES_ASYNC_API` | `ASIO` | The I/O runtime to build the tests and examples on, `ASIO` or `COROSIO`, see [doc/corosio.rst](doc/corosio.rst). A COROSIO build fetches Capy and Corosio, unless they are there already. The runtime targets are there wherever their runtime is, whichever this is. |
 | `C_ARES_ASYNC_TLS` | `OpenSSL` | The TLS library that the targets link, `OpenSSL` or `AWS-LC`. `ssl_ROOT` says where the latter is installed. |
+| `C_ARES_ASYNC_DOQ` | `OFF` | Adds DNS over QUIC: fetches and builds anyhttp, for its QUIC (and with it Capy and Boost.HTTP), and makes the target `c_ares_async::doq`, which the tests and examples then link. Asio only, and not installed. See [doc/dns-over-quic.rst](doc/dns-over-quic.rst). |
 | `C_ARES_ASYNC_BUILD_TESTS` | top-level only | Builds the tests. Also off where `BUILD_TESTING` is. |
 | `C_ARES_ASYNC_BUILD_EXAMPLES` | top-level only | Builds the examples. |
 | `C_ARES_ASYNC_BUILD_DOCS` | top-level only | Builds the code of the guide, and adds the `docs` target where there is a `doxygen` and a `sphinx-build` to make them with. |
@@ -204,6 +207,7 @@ lookup on Asio into the same program as the ones on Corosio.
 * [The Corosio runtime](doc/corosio.rst): the second runtime, and what porting to it found.
 * [HTTPS records](doc/https-records.rst)
 * [DNS over TLS](doc/dns-over-tls.rst)
+* [DNS over QUIC](doc/dns-over-quic.rst)
 
 ## Good to know
 
@@ -211,8 +215,11 @@ lookup on Asio into the same program as the ones on Corosio.
   what a cancellation can do is `ares_cancel()`, for the whole resolver. Every pending operation
   then completes with `c_ares_async::errors::canceled`, which compares equal to
   `errc::operation_canceled` on either runtime. On Asio, only a terminal cancellation counts.
-* **A resolver is for one thread at a time.** Where the `io_context` runs on several, make its
-  executor a strand and start the lookups from inside it.
+* **A resolver is for one thread at a time,** and any number of them may be in use at once. Where
+  the context runs on several threads, make the resolver's executor a strand -- a `capy::strand` on
+  Corosio, which the resolver takes as it is -- and use the resolver from inside it only, cancelling
+  included. The resolver calls neither `ares_library_init()` nor `ares_library_cleanup()`, which
+  are not thread safe.
 * **A lookup is not complete until the context ran its handler**, including where a resolver is
   destroyed with lookups pending: they complete as cancelled, but not from inside the destructor.
 * **A translation unit that includes `resolver.hpp` compiles the resolver.** That is what being

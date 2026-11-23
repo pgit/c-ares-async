@@ -39,6 +39,7 @@ namespace c_ares_async::inline C_ARES_ASYNC_RUNTIME
 namespace detail
 {
 class tls_transport;
+class quic_transport;
 } // namespace detail
 
 // --------------------------------------------------------------------------------------------------
@@ -64,9 +65,16 @@ class tls_transport;
     completion token. See `doc/corosio.rst`.
 
     @par Thread safety
-    Distinct objects: safe. Shared objects: unsafe. Where the context runs on
-    more than one thread, make the executor of the resolver a strand and call
-    the resolver from inside that strand.
+    Distinct objects: safe. Shared objects: unsafe. A resolver also works
+    on its own, when one of its sockets is ready or its timer expires, and
+    does so on its executor. Where the context runs on more than one thread,
+    make that executor a strand, and use the resolver from inside that
+    strand only: start lookups from a coroutine on it, cancel them from
+    there, configure and destroy the resolver there. On Corosio, the
+    resolver takes a `capy::strand` with a constructor of its own. The
+    resolver does not call `ares_library_init()` or
+    `ares_library_cleanup()`, which are not thread safe. See
+    `doc/programmers-guide.rst`.
 
     @par Cancellation
     Both operations can be cancelled -- by a cancellation of the terminal
@@ -138,7 +146,8 @@ public:
        them: in `/etc/resolv.conf` and what goes with it.
 
        With `tls.enabled`, every query goes out over DNS over TLS instead of
-       UDP or TCP in the clear, and the servers are asked on port 853.
+       UDP or TCP in the clear, and the servers are asked on port 853. With
+       `tls.quic` as well, it is DNS over QUIC instead, on the same port.
 
        @param executor Runs everything the resolver does, and every
        completion handler that has no executor of its own.
@@ -148,9 +157,25 @@ public:
        @par Exceptions
        @ref system_error where c-ares cannot be set up, with its status code
        as @ref make_ares_error makes it, and `std::runtime_error` where the
-       TLS library cannot.
+       TLS library cannot. @ref system_error with
+       `errc::operation_not_supported` for `tls.quic` where the library is
+       built without DNS over QUIC.
     */
    explicit resolver(executor_type executor, const tls_options& tls = {});
+
+#if C_ARES_ASYNC_COROSIO
+   //
+   // Makes a resolver that runs on 'strand', as the one above does on an executor. Corosio only:
+   // capy::any_executor, which is the executor_type there, takes no capy::strand, so the strand
+   // goes in under another type. See doc/corosio.rst.
+   //
+   template <typename Ex>
+   explicit resolver(boost::capy::strand<Ex> strand, const tls_options& tls = {})
+      : resolver(executor_type(detail::StrandExecutor<boost::capy::strand<Ex>>{std::move(strand)}),
+                 tls)
+   {
+   }
+#endif
 
    /** Completes every pending operation with @ref errors::canceled and
        closes the sockets.
@@ -342,6 +367,13 @@ private:
    ares_channel_t* m_channel = nullptr;
    log_function m_logger; // declared ahead of the transport, which keeps a reference to it
    std::unique_ptr<detail::tls_transport> m_tls; // null unless DNS over TLS was asked for
+
+   //
+   // Null unless DNS over QUIC was asked for. A shared_ptr, as that is what can be destroyed where
+   // the type is incomplete: it is defined where C_ARES_ASYNC_DOQ is 1, and not otherwise, and the
+   // resolver is the same object either way.
+   //
+   std::shared_ptr<detail::quic_transport> m_quic;
    std::map<ares_socket_t, std::shared_ptr<socket_watch>> m_sockets;
 };
 

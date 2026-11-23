@@ -12,16 +12,29 @@
 namespace c_ares_async
 {
 
-/** Whether a @ref resolver uses DNS over TLS (RFC 7858), and how.
+/** Whether a @ref resolver uses DNS over TLS (RFC 7858) or DNS over QUIC
+    (RFC 9250), and how.
 
     c-ares has no encrypted transport of its own. What the library does is
     to put a TLS session under the TCP connections that c-ares opens, which
-    is all it takes to turn DNS over TCP into DNS over TLS.
+    is all it takes to turn DNS over TCP into DNS over TLS -- or to have a
+    QUIC connection answer for them, one stream per query, which makes it
+    DNS over QUIC.
  */
 struct tls_options
 {
    /** Sends every query over TLS: no UDP, and no TCP in the clear either. */
    bool enabled = false;
+
+   /** With @ref enabled, sends the queries over QUIC rather than over TCP:
+       DNS over QUIC, on UDP port 853, with the same @ref hostname and
+       @ref verify.
+
+       Only where the library is built with it, with anyhttp's QUIC: the
+       target `c_ares_async::doq`, which defines `C_ARES_ASYNC_DOQ`. Without
+       that, a resolver asked for it cannot be made.
+    */
+   bool quic = false;
 
    /** The name of the server, for SNI and for its certificate to be checked
        against.

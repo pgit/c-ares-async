@@ -76,6 +76,13 @@ option(C_ARES_ASYNC_INSTALL "Generate the install rules of c_ares_async" ${PROJE
 set(C_ARES_ASYNC_TLS "OpenSSL" CACHE STRING "TLS library to link: OpenSSL or AWS-LC")
 set_property(CACHE C_ARES_ASYNC_TLS PROPERTY STRINGS OpenSSL AWS-LC)
 
+#
+# c-ares has no DNS over QUIC either -- see detail/quic_transport.hpp. That one takes a QUIC stack,
+# which is anyhttp's: it is fetched and built as part of this build, on the runtime and TLS library
+# chosen here, and is what c_ares_async::doq adds to c_ares_async::asio. Asio only, for now.
+#
+option(C_ARES_ASYNC_DOQ "Add DNS over QUIC (RFC 9250), with anyhttp's QUIC: c_ares_async::doq" OFF)
+
 # --------------------------------------------------------------------------------------------------
 #
 # Dependencies. The versions are kept in variables because the package configuration file asks
@@ -154,6 +161,36 @@ else()
     message(FATAL_ERROR "C_ARES_ASYNC_TLS is '${C_ARES_ASYNC_TLS}', expected OpenSSL or AWS-LC")
 endif()
 
+#
+# anyhttp, for its QUIC. Pinned, as Capy and Corosio are: at the merge of
+# https://github.com/pgit/anyhttp/pull/50, which is what DNS over QUIC needs of quic::connect() --
+# connecting to an address while verifying the certificate for a name given apart from it, and not
+# verifying at all. It fetches Capy and Boost.HTTP in turn, which its HTTP/1.1 is built on, at pins
+# of its own. As a subproject it is the library and nothing else -- no tests, no programs, no
+# install rules.
+#
+if (C_ARES_ASYNC_DOQ)
+    if (NOT C_ARES_ASYNC_API STREQUAL "ASIO")
+        message(FATAL_ERROR "C_ARES_ASYNC_DOQ needs C_ARES_ASYNC_API=ASIO")
+    endif()
+
+    if (NOT TARGET anyhttp::anyhttp)
+        include(FetchContent)
+        set(ANYHTTP_API "ASIO" CACHE STRING "" FORCE)
+        # the very same TLS library, which ngtcp2's crypto backend has to agree with
+        set(TLS_LIBRARY "${C_ARES_ASYNC_TLS}" CACHE STRING "" FORCE)
+        if (C_ARES_ASYNC_TLS STREQUAL "AWS-LC" AND DEFINED ssl_ROOT)
+            set(BORINGSSL_ROOT "${ssl_ROOT}" CACHE PATH "" FORCE)
+        endif()
+        FetchContent_Declare(
+            anyhttp
+            GIT_REPOSITORY https://github.com/pgit/anyhttp.git
+            GIT_TAG 3d4c47aae9c695afa5939ac3398646375d69ec4b
+            EXCLUDE_FROM_ALL)
+        FetchContent_MakeAvailable(anyhttp)
+    endif()
+endif()
+
 # --------------------------------------------------------------------------------------------------
 #
 # The library: headers, and nothing to build. c_ares_async::headers is what either runtime needs
@@ -171,17 +208,21 @@ target_sources(
               BASE_DIRS include
               FILES include/c_ares_async.hpp
                     include/c_ares_async/asio/event_loop.hpp
+                    include/c_ares_async/asio/formatter.hpp
                     include/c_ares_async/asio/runtime.hpp
                     include/c_ares_async/corosio/event_loop.hpp
+                    include/c_ares_async/corosio/formatter.hpp
                     include/c_ares_async/corosio/runtime.hpp
                     include/c_ares_async/detail/event_loop.hpp
                     include/c_ares_async/detail/log.hpp
+                    include/c_ares_async/detail/quic_transport.hpp
                     include/c_ares_async/detail/server_list.hpp
                     include/c_ares_async/detail/socket_functions.hpp
                     include/c_ares_async/detail/tls_transport.hpp
                     include/c_ares_async/error.hpp
                     include/c_ares_async/https_record.hpp
                     include/c_ares_async/impl/error.ipp
+                    include/c_ares_async/impl/quic_transport.ipp
                     include/c_ares_async/impl/resolver.ipp
                     include/c_ares_async/impl/server_list.ipp
                     include/c_ares_async/impl/socket_functions.ipp
@@ -212,12 +253,35 @@ if (TARGET Boost::corosio AND TARGET Boost::capy)
 endif()
 
 #
+# DNS over QUIC, on top of c_ares_async::asio: anyhttp, and the macro that has the headers use it.
+# Every translation unit of a program that makes a resolver has to agree on that macro, so a
+# program that uses this target uses it everywhere instead of c_ares_async::asio. It is not
+# installed: anyhttp is built as part of this build, and only for it.
+#
+if (C_ARES_ASYNC_DOQ AND TARGET c_ares_async_asio)
+    add_library(c_ares_async_doq INTERFACE)
+    add_library(c_ares_async::doq ALIAS c_ares_async_doq)
+    target_link_libraries(c_ares_async_doq INTERFACE c_ares_async_asio anyhttp::anyhttp)
+    target_compile_definitions(c_ares_async_doq INTERFACE C_ARES_ASYNC_DOQ=1)
+endif()
+
+#
 # What the tests, the examples and the snippets link: the runtime of this build tree, which is
 # also the name of the directories that what belongs to one runtime only lives in.
 #
 string(TOLOWER ${C_ARES_ASYNC_API} c_ares_async_runtime)
 
-foreach (runtime IN ITEMS asio corosio)
+#
+# And the target they link for it: the runtime's own, or c_ares_async::doq, which is the same with
+# DNS over QUIC added, where this build has it.
+#
+if (TARGET c_ares_async::doq)
+    set(c_ares_async_target c_ares_async::doq)
+else()
+    set(c_ares_async_target c_ares_async::${c_ares_async_runtime})
+endif()
+
+foreach (runtime IN ITEMS asio corosio doq)
     if (TARGET c_ares_async::${runtime})
         message(STATUS "c_ares_async: c_ares_async::${runtime} is there")
     endif()

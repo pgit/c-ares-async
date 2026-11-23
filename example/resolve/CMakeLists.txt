@@ -26,5 +26,5 @@ if (c_ares_async_runtime STREQUAL "asio")
 endif()
 
 target_link_libraries(
-    resolve PRIVATE c_ares_async::${c_ares_async_runtime} Boost::program_options
+    resolve PRIVATE ${c_ares_async_target} Boost::program_options
                     spdlog::spdlog_header_only Threads::Threads)

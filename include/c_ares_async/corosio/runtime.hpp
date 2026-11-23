@@ -14,6 +14,7 @@
 #include <boost/capy/ex/any_executor.hpp>
 #include <boost/capy/ex/await_context.hpp>
 #include <boost/capy/ex/run_async.hpp>
+#include <boost/capy/ex/strand.hpp>
 #include <boost/capy/ex/this_coro.hpp>
 #include <boost/capy/results.hpp>
 #include <boost/capy/task.hpp>
@@ -334,6 +335,31 @@ struct YieldNow
 };
 
 inline YieldNow yield_now() { return {}; }
+
+// --------------------------------------------------------------------------------------------------
+
+//
+// A strand, as something that capy::any_executor takes. It takes any executor but a capy::strand:
+// Capy rules those out so that a strand<any_executor> can be made (7676188), which leaves a
+// resolver nothing to keep a strand in. This is the strand under another type, and forwards
+// everything to it.
+//
+template <typename Strand>
+struct StrandExecutor
+{
+   Strand strand;
+
+   auto& context() const noexcept { return strand.context(); }
+   void on_work_started() const noexcept { strand.on_work_started(); }
+   void on_work_finished() const noexcept { strand.on_work_finished(); }
+   std::coroutine_handle<> dispatch(boost::capy::continuation& c) const
+   {
+      return strand.dispatch(c);
+   }
+   void post(boost::capy::continuation& c) const { strand.post(c); }
+
+   bool operator==(const StrandExecutor&) const noexcept = default;
+};
 
 // --------------------------------------------------------------------------------------------------
 

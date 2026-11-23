@@ -4,7 +4,7 @@
 #
 add_executable(c_ares_async_example_minimal ${c_ares_async_runtime}/minimal.cpp)
 set_target_properties(c_ares_async_example_minimal PROPERTIES OUTPUT_NAME minimal)
-target_link_libraries(c_ares_async_example_minimal PRIVATE c_ares_async::${c_ares_async_runtime})
+target_link_libraries(c_ares_async_example_minimal PRIVATE ${c_ares_async_target})
 
 #
 # The command line builds on either runtime: what it needs of its event loop is in a header of

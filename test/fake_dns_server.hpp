@@ -4,7 +4,8 @@
 //
 // A DNS server on the loopback interface that answers from a table, for a resolver to be pointed
 // at. It speaks UDP, TCP and, once it has a certificate, DNS over TLS -- all on one port, as
-// c-ares has a single port for a server whichever way it asks.
+// c-ares has a single port for a server whichever way it asks. Where the tests are built with
+// DNS over QUIC, it speaks that as well, with anyhttp's server, on a port of its own.
 //
 // The messages are taken apart and put together by c-ares' own record functions, so the tests do
 // not come with a second implementation of the wire format to keep right.
@@ -14,6 +15,8 @@
 #include "test_certificate.hpp"
 
 #include <boost/asio/any_io_executor.hpp>
+
+#include <chrono>
 
 #include <ares.h>
 
@@ -30,7 +33,8 @@ public:
    {
       udp,
       tcp,
-      tls
+      tls,
+      quic
    };
 
    //
@@ -85,6 +89,35 @@ public:
    // 'certificate'.
    //
    void use_tls(const test_certificate& certificate);
+
+#if C_ARES_ASYNC_DOQ
+   //
+   // Starts serving DNS over QUIC on a port of its own, the server presenting 'certificate', and
+   // dropping a connection that has been quiet for 'idle_timeout'.
+   //
+   void use_quic(const test_certificate& certificate,
+                 std::chrono::nanoseconds idle_timeout = std::chrono::seconds(30));
+
+   //
+   // Where it serves DNS over QUIC, the way resolver::set_servers() takes it.
+   //
+   std::string quic_address() const;
+
+   //
+   // Stops serving, all of it, as the destructor does -- for a context that is to run out of work
+   // before it goes. A QUIC connection takes its closing period to end, and anyhttp keeps what it
+   // waits for until then, which is not freed where the context goes away before that.
+   //
+   void shutdown();
+
+   //
+   // A way of breaking the protocol: a second message on the stream, after the answer.
+   //
+   void set_quic_extra_message(bool extra);
+
+   std::size_t quic_connections() const; // that negotiated "doq"
+   const std::vector<unsigned>& quic_ids() const; // the message ID of every query, in order
+#endif
 
    //
    // What happened so far.

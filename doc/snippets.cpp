@@ -27,6 +27,9 @@
 #else
 #include <boost/capy/error.hpp>
 #include <boost/capy/ex/run.hpp>
+#include <boost/capy/ex/run_async.hpp>
+#include <boost/capy/ex/strand.hpp>
+#include <boost/corosio/io_context.hpp>
 #include <boost/corosio/timeout.hpp>
 #endif
 
@@ -36,7 +39,9 @@
 #include <stop_token>
 #include <string>
 #include <string_view>
+#include <thread>
 #include <utility>
+#include <vector>
 
 namespace snippets
 {
@@ -279,6 +284,24 @@ c_ares_async::Task<void> times_out(c_ares_async::resolver& resolver)
       std::cerr << "took too long\n";
 }
 // [timeout-end]
+
+//
+// The strand comes from capy::this_coro::executor, a reference into the frame of run_async()'s
+// trampoline, which the resolver's stopped work can outlive. See
+// test/corosio/this_coro_executor.cpp.
+//
+// [strand-corosio]
+void on_many_threads(boost::corosio::io_context& context)
+{
+   const auto strand = boost::capy::strand(context.get_executor());
+
+   boost::capy::run_async(strand)([]() -> c_ares_async::Task<void> {
+      auto strand = co_await boost::capy::this_coro::executor;
+      c_ares_async::resolver resolver(strand);
+      co_await print_addresses(resolver, "example.com");
+   }());
+}
+// [strand-corosio-end]
 
 #endif
 
