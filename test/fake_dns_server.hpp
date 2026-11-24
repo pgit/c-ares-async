@@ -26,6 +26,7 @@
 #include <ares.h>
 
 #include <cstddef>
+#include <cstdint>
 #include <memory>
 #include <string>
 #include <string_view>
@@ -97,13 +98,15 @@ public:
 
 #if C_ARES_ASYNC_DOQ
    //
-   // Starts serving DNS over QUIC on a port of its own, the server presenting 'certificate', and
-   // dropping a connection that has been quiet for 'idle_timeout'. It runs on 'executor', which is
-   // anyhttp's runtime's: the one the server was made with on Asio, and the resolver's loop on
-   // Corosio, which the tests step from the same thread as the server's.
+   // Starts serving DNS over QUIC on a port of its own, the server presenting 'certificate',
+   // dropping a connection that has been quiet for 'idle_timeout', and allowing a client
+   // 'max_streams' streams at once. It runs on 'executor', which is anyhttp's runtime's: the one
+   // the server was made with on Asio, and the resolver's loop on Corosio, which the tests step
+   // from the same thread as the server's.
    //
    void use_quic(const anyhttp::Executor& executor, const test_certificate& certificate,
-                 std::chrono::nanoseconds idle_timeout = std::chrono::seconds(30));
+                 std::chrono::nanoseconds idle_timeout = std::chrono::seconds(30),
+                 std::uint64_t max_streams = 100);
 
    //
    // Where it serves DNS over QUIC, the way resolver::set_servers() takes it.
@@ -121,6 +124,13 @@ public:
    // A way of breaking the protocol: a second message on the stream, after the answer.
    //
    void set_quic_extra_message(bool extra);
+
+   //
+   // A way of keeping a client waiting: the query is read, and its stream kept open with no answer
+   // on it, until the server shuts down -- where set_silent() resets the stream, which lets the
+   // client open another in its place.
+   //
+   void set_quic_hold(bool hold);
 
    std::size_t quic_connections() const; // that negotiated "doq"
    const std::vector<unsigned>& quic_ids() const; // the message ID of every query, in order

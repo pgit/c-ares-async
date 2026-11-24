@@ -12,26 +12,25 @@
 #include <c_ares_async/detail/quic_transport.hpp> // NOLINT(misc-header-include-cycle)
 #include <c_ares_async/detail/socket_functions.hpp>
 
-#include <anyhttp/net.hpp> // io::read_some() and io::write(), which take Asio's buffers
 #include <anyhttp/quic.hpp>
 #include <anyhttp/runtime.hpp>
 
-#include <boost/asio/buffer.hpp>
-
+#include <fcntl.h>
 #include <net/if.h>
 #include <netinet/in.h>
 #include <sys/socket.h>
 #include <unistd.h>
 
+#include <algorithm>
 #include <array>
 #include <cerrno>
 #include <cstring>
-#include <deque>
 #include <stdexcept>
 #include <string>
 #include <tuple>
 #include <utility>
 #include <variant>
+#include <vector>
 
 namespace c_ares_async::inline C_ARES_ASYNC_RUNTIME::detail
 {
@@ -50,35 +49,28 @@ inline constexpr std::size_t dns_max_message_size = 65535;
 //
 // One TCP connection c-ares believes it has, and the QUIC connection that answers for it.
 //
-// The coroutines take a shared_ptr to the bridge, which is what keeps it around -- c-ares closing
-// its socket only stops it. All of it runs on the resolver's executor, so it needs no lock.
+// c-ares' side of it is the socket functions, which come here from inside c-ares, and the
+// readiness the resolver waits on, see quic_transport::descriptor. The QUIC side is coroutines,
+// which take a shared_ptr to the bridge: that is what keeps it around, as c-ares closing its
+// socket only stops it. All of it runs on the resolver's executor, so it needs no lock.
 //
 // It is written once, for either runtime. What it does on the runtime is anyhttp's runtime layer
-// -- starting coroutines, reading and writing, waiting for one of two things -- as the bridge is
-// only ever compiled along with anyhttp, which has that layer for both. Its end of the socketpair
-// is the event loop's LocalSocket, see detail/event_loop.hpp.
+// -- starting coroutines, posting, waiting for one of two things -- as the bridge is only ever
+// compiled along with anyhttp, which has that layer for both.
 //
 // Every coroutine here yields before it does anything else. anyhttp::launch() starts one from the
 // executor's queue on Asio, as co_spawn() does, but right away on Corosio, where the caller is on
-// the executor already -- and what launches them here is in the middle of something: c-ares, in
-// aconnect(), or a loop over the queries waiting for a stream. This way, they start the same way
-// on both runtimes, after their caller is through.
+// the executor already -- and what launches them here is c-ares, in the middle of aconnect() or
+// asendto(). This way, they start the same way on both runtimes, after c-ares is through.
 //
 class quic_transport::bridge : public std::enable_shared_from_this<bridge>
 {
 public:
    bridge(const Executor& executor, ares_socket_t fd, int domain, const tls_options& options,
           const log_function& logger)
-      : m_executor(executor), m_fd(fd), m_domain(domain), m_socket(executor), m_options(options),
-        m_logger(&logger)
+      : m_executor(executor), m_fd(fd), m_domain(domain), m_options(options), m_logger(&logger)
    {
    }
-
-   //
-   // Takes 'peer', our end of the socketpair, which the bridge closes from then on. Where that
-   // fails, it is still the caller's.
-   //
-   error_code adopt(int peer) noexcept { return adopt_socket(m_socket, peer); }
 
    int domain() const noexcept { return m_domain; }
 
@@ -92,9 +84,103 @@ public:
    }
 
    //
+   // What c-ares sends: all of it, every time. The messages in it go out as soon as they are
+   // complete and there is a connection, and until then they wait here -- which is where a TCP
+   // connection would have them wait, too, in its send buffer.
+   //
+   ares_ssize_t send(const void* data, std::size_t size) noexcept
+   {
+      if (m_stopped)
+      {
+         errno = ECONNRESET;
+         return -1;
+      }
+
+      //
+      // Nothing is to be thrown back into c-ares, which is C. What runs out of memory here is in
+      // the middle of a message, and the stream c-ares has written it to is no good after that.
+      //
+      try
+      {
+         m_sent.append(static_cast<const char*>(data), size);
+         while (m_sent.size() >= doq_prefix_size)
+         {
+            const std::size_t length = (std::size_t{static_cast<unsigned char>(m_sent[0])} << 8) |
+                                       static_cast<unsigned char>(m_sent[1]);
+            if (length < dns_header_size)
+            {
+               log(log_level::error, "c-ares sent a message of {} bytes", length);
+               stop();
+               errno = ECONNRESET;
+               return -1;
+            }
+
+            if (m_sent.size() < doq_prefix_size + length)
+               break;
+
+            auto query = m_sent.substr(0, doq_prefix_size + length);
+            m_sent.erase(0, doq_prefix_size + length);
+            if (m_connection)
+               start_exchange(std::move(query));
+            else
+               m_pending.push_back(std::move(query));
+         }
+      }
+      catch (...)
+      {
+         stop();
+         errno = ENOMEM;
+         return -1;
+      }
+
+      return static_cast<ares_ssize_t>(size);
+   }
+
+   //
+   // The answers, in the order they came in, for as much of them as c-ares has room for -- and
+   // once they are all read and the connection is over, the end of the stream.
+   //
+   ares_ssize_t receive(void* data, std::size_t size) noexcept
+   {
+      if (!m_received.empty())
+      {
+         const auto n = std::min(size, m_received.size());
+         std::memcpy(data, m_received.data(), n);
+         m_received.erase(0, n);
+         return static_cast<ares_ssize_t>(n);
+      }
+
+      if (m_stopped)
+         return 0;
+
+      errno = EAGAIN;
+      return -1;
+   }
+
+   //
+   // The waits of quic_transport::descriptor. There is one for reading at a time, as the resolver
+   // has one at a time in each direction; one for writing is ready right away, as send() takes
+   // everything.
+   //
+   void wait(wait_type type, std::function<void(const error_code&)> on_ready)
+   {
+      if (type == wait_type::write || readable())
+         complete(std::move(on_ready), {});
+      else
+         m_on_readable = std::move(on_ready);
+   }
+
+   void cancel_wait()
+   {
+      if (m_on_readable)
+         complete(std::exchange(m_on_readable, nullptr), errors::canceled);
+   }
+
+   //
    // Ends it all: the connection that is being made, the QUIC connection with what is open on it,
-   // and our end of the socketpair, which is the end of the stream for c-ares. Called by c-ares
-   // closing its socket as well as by whatever went wrong here; whichever is first does it.
+   // and the queries that have not gone out. c-ares reads the end of its stream once it has read
+   // what is there. Called by c-ares closing its socket as well as by whatever went wrong here;
+   // whichever is first does it.
    //
    // From here on, nothing looks at the resolver's logger any more, which may be gone.
    //
@@ -105,19 +191,21 @@ public:
 
       m_stopped = true;
       m_logger = nullptr;
-      m_waiting.clear();
+      m_sent.clear();
+      m_pending.clear();
       m_stop.set(); // which ends the connection that is being made, if it still is
 
       //
       // Let go of the connection, rather than just close it. anyhttp keeps the handler of the
       // accept_stream() that watch() waits in, and with that the bridge, until the connection has
       // gone through its closing period -- and the bridge is not to keep the connection in turn,
-      // or the two keep each other where the context does not run that long.
+      // or the two keep each other where the context does not run that long. The opens that wait
+      // for a stream fail with it.
       //
       auto connection = std::move(m_connection);
       connection.close(static_cast<std::uint64_t>(doq_error::no_error));
 
-      close_socket(m_socket);
+      notify();
    }
 
 private:
@@ -134,6 +222,25 @@ private:
       return std::format("{}:{}", m_server.address().to_string(), m_server.port());
    }
 
+   bool readable() const noexcept { return !m_received.empty() || m_stopped; }
+
+   //
+   // From the executor's queue, see quic_transport::descriptor.
+   //
+   void complete(std::function<void(const error_code&)> on_ready, const error_code& ec)
+   {
+      anyhttp::run_later(m_executor, [on_ready = std::move(on_ready), ec] { on_ready(ec); });
+   }
+
+   //
+   // Completes the wait for reading, where there is one, if there is something to read now.
+   //
+   void notify()
+   {
+      if (m_on_readable && readable())
+         complete(std::exchange(m_on_readable, nullptr), {});
+   }
+
    //
    // Comes back once stop() has been called, or when it is cancelled. A task, for when_either()
    // to take: what Event::wait() returns is one on Asio, and an awaitable of Capy's on Corosio.
@@ -141,28 +248,7 @@ private:
    Task<void> stopped() { std::ignore = co_await m_stop.wait(); }
 
    //
-   // Exactly 'size' bytes off our end of the socketpair, or the error that came first.
-   //
-   Task<error_code> read(void* data, std::size_t size)
-   {
-      auto* at = static_cast<unsigned char*>(data);
-      while (size > 0)
-      {
-         auto [ec, n] =
-            co_await anyhttp::io::read_some(m_socket, boost::asio::mutable_buffer(at, size));
-         if (ec)
-            co_return ec;
-         if (n == 0)
-            co_return anyhttp::errors::eof;
-
-         at += n;
-         size -= n;
-      }
-      co_return error_code{};
-   }
-
-   //
-   // The connection, and then the queries, as c-ares writes them to its end of the socketpair.
+   // The connection, and then the queries that have waited for it.
    //
    static Task<void> run(std::shared_ptr<bridge> self)
    {
@@ -215,35 +301,15 @@ private:
 
       anyhttp::launch(self->m_executor, watch(self));
 
-      for (;;)
-      {
-         std::array<unsigned char, doq_prefix_size> prefix{};
-         if (co_await self->read(prefix.data(), prefix.size()))
-            break; // c-ares has closed its end, or we have closed ours
-
-         const std::size_t size = (std::size_t{prefix[0]} << 8) | prefix[1];
-         if (size < dns_header_size)
-         {
-            self->log(log_level::error, "c-ares sent a message of {} bytes", size);
-            break;
-         }
-
-         std::string query(doq_prefix_size + size, '\0');
-         std::memcpy(query.data(), prefix.data(), prefix.size());
-         if (co_await self->read(query.data() + doq_prefix_size, size))
-            break;
-
+      for (auto& query : std::exchange(self->m_pending, {}))
          self->start_exchange(std::move(query));
-      }
-
-      self->stop();
    }
 
    //
    // A DoQ server opens no streams of its own (RFC 9250, section 4.2), so waiting for one is
    // waiting for the connection to end -- an idle timeout, the server closing it -- which has to
-   // be the end of the socketpair too, or c-ares would go on sending into a connection that is not
-   // there any more.
+   // be the end of the stream for c-ares too, or it would go on sending into a connection that is
+   // not there any more.
    //
    static Task<void> watch(std::shared_ptr<bridge> self)
    {
@@ -264,63 +330,34 @@ private:
       self->stop();
    }
 
-   //
-   // One query on a stream of its own. At the limit of streams that the server allows, it waits
-   // for one of those to finish.
-   //
    void start_exchange(std::string query)
    {
-      if (m_stopped)
-         return;
-
-      auto [ec, stream] = m_connection.try_open_stream();
-      if (ec == anyhttp::errors::would_block)
-      {
-         log(log_level::debug, "waiting for a stream, {} waiting already", m_waiting.size());
-         m_waiting.push_back(std::move(query));
-         return;
-      }
-
-      if (ec)
-      {
-         log(log_level::error, "cannot open a stream: {}", ec.message());
-         stop();
-         return;
-      }
-
-      anyhttp::launch(m_executor,
-                      exchange(shared_from_this(), std::move(stream), std::move(query)));
+      anyhttp::launch(m_executor, exchange(shared_from_this(), std::move(query)));
    }
 
    //
-   // The ones that had to wait for a stream, for as long as there are streams for them.
+   // One query on a stream of its own. At the limit of streams the server allows, open_stream()
+   // waits for it to allow another, and serves those that wait in the order they started -- which
+   // is the order of the queries, as each exchange starts with the one yield.
    //
-   void start_waiting()
-   {
-      while (!m_waiting.empty() && !m_stopped)
-      {
-         auto query = std::move(m_waiting.front());
-         m_waiting.pop_front();
-
-         const auto waiting = m_waiting.size();
-         start_exchange(std::move(query));
-         if (m_waiting.size() > waiting)
-         {
-            // back at the end of the line: put it in front again, it was first
-            m_waiting.push_front(std::move(m_waiting.back()));
-            m_waiting.pop_back();
-            break;
-         }
-      }
-   }
-
-   static Task<void> exchange(std::shared_ptr<bridge> self, anyhttp::quic::Stream stream,
-                              std::string query)
+   static Task<void> exchange(std::shared_ptr<bridge> self, std::string query)
    {
       co_await anyhttp::yield_now(); // see the class
+      if (self->m_stopped)
+         co_return;
+
+      auto [ec, stream] = co_await self->m_connection.open_stream();
+      if (ec)
+      {
+         if (!self->m_stopped)
+         {
+            self->log(log_level::error, "cannot open a stream: {}", ec.message());
+            self->stop();
+         }
+         co_return;
+      }
+
       co_await self->ask(stream, std::move(query));
-      stream.reset();
-      self->start_waiting();
    }
 
    //
@@ -380,9 +417,13 @@ private:
          co_return;
       }
 
+      if (m_stopped)
+         co_return;
+
       answer[doq_prefix_size] = id[0];
       answer[doq_prefix_size + 1] = id[1];
-      send_answer(std::move(answer));
+      m_received += answer;
+      notify();
    }
 
    //
@@ -396,55 +437,40 @@ private:
       stop();
    }
 
-   //
-   // The answers, in the order they came in, to c-ares' end of the socketpair -- one write at a
-   // time, which is what keeps them from getting mixed up.
-   //
-   void send_answer(std::string answer)
-   {
-      if (m_stopped)
-         return;
-
-      m_answers.push_back(std::move(answer));
-      if (!m_writing)
-      {
-         m_writing = true;
-         anyhttp::launch(m_executor, write_answers(shared_from_this()));
-      }
-   }
-
-   static Task<void> write_answers(std::shared_ptr<bridge> self)
-   {
-      co_await anyhttp::yield_now(); // see the class
-      while (!self->m_answers.empty() && !self->m_stopped)
-      {
-         auto [ec, n] = co_await anyhttp::io::write(self->m_socket,
-                                                    boost::asio::buffer(self->m_answers.front()));
-         if (ec)
-         {
-            self->stop();
-            break;
-         }
-         self->m_answers.pop_front();
-      }
-
-      self->m_writing = false;
-   }
-
    Executor m_executor;
-   ares_socket_t m_fd; // c-ares' end, which is what the log messages go by
+   ares_socket_t m_fd; // c-ares' descriptor, which is what the log messages go by
    int m_domain;
-   LocalSocket m_socket; // our end
    tls_options m_options;
    const log_function* m_logger; // null once stopped
    TcpEndpoint m_server;
    anyhttp::quic::Connection m_connection;
    anyhttp::Event m_stop; // set by stop(), for the connection that is being made
-   std::deque<std::string> m_waiting; // queries waiting for a stream
-   std::deque<std::string> m_answers; // answers waiting for c-ares
-   bool m_writing = false;
+   std::string m_sent; // what c-ares has sent of a message that is not complete yet
+   std::vector<std::string> m_pending; // queries waiting for the connection
+   std::string m_received; // answers that c-ares has not read yet
+   std::function<void(const error_code&)> m_on_readable; // the resolver's wait for reading
    bool m_stopped = false;
 };
+
+// --------------------------------------------------------------------------------------------------
+
+inline quic_transport::descriptor::descriptor(std::shared_ptr<bridge> bridge) noexcept
+   : m_bridge(std::move(bridge))
+{
+}
+
+inline void quic_transport::descriptor::detach()
+{
+   if (m_bridge)
+      std::exchange(m_bridge, nullptr)->cancel_wait();
+}
+
+inline void quic_transport::descriptor::wait(wait_type type,
+                                             std::function<void(const error_code&)> on_ready)
+{
+   if (m_bridge)
+      m_bridge->wait(type, std::move(on_ready));
+}
 
 // --------------------------------------------------------------------------------------------------
 
@@ -468,6 +494,22 @@ inline void quic_transport::install(ares_channel_t* channel)
                                ares_strerror(static_cast<int>(status)));
 }
 
+inline std::optional<quic_transport::descriptor>
+quic_transport::find_descriptor(ares_socket_t fd) const
+{
+   const auto it = m_bridges.find(fd);
+   if (it == m_bridges.end())
+      return std::nullopt;
+
+   return descriptor(it->second);
+}
+
+inline quic_transport::bridge* quic_transport::find(ares_socket_t fd) const
+{
+   const auto it = m_bridges.find(fd);
+   return it == m_bridges.end() ? nullptr : it->second.get();
+}
+
 // --------------------------------------------------------------------------------------------------
 
 inline ares_socket_t quic_transport::on_socket(int domain, int type, int protocol)
@@ -485,47 +527,32 @@ inline ares_socket_t quic_transport::on_socket(int domain, int type, int protoco
       return fd < 0 ? ARES_SOCKET_BAD : fd;
    }
 
-   int fds[2];
-   if (::socketpair(AF_UNIX, SOCK_STREAM | SOCK_NONBLOCK | SOCK_CLOEXEC, 0, fds) != 0)
+   //
+   // A socket of ours is no socket of the system's, but its number has to be one that none of
+   // those can have while it is ours: c-ares tells its sockets apart by it, and the UDP ones above
+   // are the system's. A descriptor that is open has a number of its own, and nothing is ever done
+   // on this one -- c-ares calls the functions below for everything, and the resolver waits on
+   // the bridge.
+   //
+   const int fd = ::open("/dev/null", O_RDONLY | O_CLOEXEC);
+   if (fd < 0)
       return ARES_SOCKET_BAD;
 
    //
-   // Nothing is to be thrown back into c-ares, which is C. Once the bridge has adopted our end,
-   // that is its socket's to close, and only before that ours.
+   // Nothing is to be thrown back into c-ares, which is C.
    //
-   std::shared_ptr<bridge> created;
    try
    {
-      created = std::make_shared<bridge>(m_executor, fds[0], domain, m_options, m_logger);
+      m_bridges.emplace(fd, std::make_shared<bridge>(m_executor, fd, domain, m_options, m_logger));
    }
    catch (...)
    {
-      ::close(fds[1]);
-      ::close(fds[0]);
+      ::close(fd);
       errno = ENOMEM;
       return ARES_SOCKET_BAD;
    }
 
-   if (const auto ec = created->adopt(fds[1]))
-   {
-      ::close(fds[1]);
-      ::close(fds[0]);
-      errno = ec.value(); // the system's, as both runtimes report it
-      return ARES_SOCKET_BAD;
-   }
-
-   try
-   {
-      m_bridges.emplace(fds[0], created);
-   }
-   catch (...)
-   {
-      ::close(fds[0]);
-      errno = ENOMEM;
-      return ARES_SOCKET_BAD;
-   }
-
-   return fds[0];
+   return fd;
 }
 
 inline int quic_transport::on_close(ares_socket_t fd)
@@ -540,15 +567,30 @@ inline int quic_transport::on_close(ares_socket_t fd)
 }
 
 //
-// The socketpair is connected from the start, so to c-ares the connect is through at once; the
-// QUIC connection takes its time behind it, and the queries wait in the socketpair until it is
-// there.
+// A socket of ours has none of the options c-ares sets: what they are for is anyhttp's UDP socket,
+// which takes none of them. That turns fast open down as well, which is what c-ares takes ENOSYS
+// for, see socket_functions.hpp -- and there is no connection that it could take for one that is
+// up too early, as the connect is through at once.
+//
+inline int quic_transport::on_setsockopt(ares_socket_t fd, ares_socket_opt_t opt, const void* value,
+                                         ares_socklen_t size)
+{
+   if (!find(fd))
+      return set_socket_option(fd, opt, value, size);
+
+   errno = ENOSYS;
+   return -1;
+}
+
+//
+// To c-ares, the connect is through at once; the QUIC connection takes its time behind it, and the
+// queries wait in the bridge until it is there.
 //
 inline int quic_transport::on_connect(ares_socket_t fd, const struct sockaddr* address,
                                       ares_socklen_t length)
 {
-   const auto it = m_bridges.find(fd);
-   if (it == m_bridges.end())
+   auto* bridge = find(fd);
+   if (!bridge)
       return ::connect(fd, address, length);
 
    const auto server = make_endpoint(address, length);
@@ -558,8 +600,29 @@ inline int quic_transport::on_connect(ares_socket_t fd, const struct sockaddr* a
       return -1;
    }
 
-   it->second->start(*server);
+   bridge->start(*server);
    return 0;
+}
+
+inline ares_ssize_t quic_transport::on_recv(ares_socket_t fd, void* buffer, size_t length)
+{
+   if (auto* bridge = find(fd))
+      return bridge->receive(buffer, length);
+
+   return ::recv(fd, buffer, length, 0);
+}
+
+//
+// A socket of the system's may be closed by the time c-ares writes to it, and that is to be a
+// failed write, not a SIGPIPE.
+//
+inline ares_ssize_t quic_transport::on_send(ares_socket_t fd, const void* buffer, size_t length,
+                                            int flags)
+{
+   if (auto* bridge = find(fd))
+      return bridge->send(buffer, length);
+
+   return ::send(fd, buffer, length, flags | MSG_NOSIGNAL);
 }
 
 //
@@ -569,11 +632,11 @@ inline int quic_transport::on_connect(ares_socket_t fd, const struct sockaddr* a
 inline int quic_transport::on_getsockname(ares_socket_t fd, struct sockaddr* address,
                                           ares_socklen_t* length)
 {
-   const auto it = m_bridges.find(fd);
-   if (it == m_bridges.end())
+   auto* bridge = find(fd);
+   if (!bridge)
       return ::getsockname(fd, address, length);
 
-   const auto size = it->second->domain() == AF_INET6 ? sizeof(sockaddr_in6) : sizeof(sockaddr_in);
+   const auto size = bridge->domain() == AF_INET6 ? sizeof(sockaddr_in6) : sizeof(sockaddr_in);
    if (!address || !length || *length < size)
    {
       errno = EINVAL;
@@ -581,16 +644,29 @@ inline int quic_transport::on_getsockname(ares_socket_t fd, struct sockaddr* add
    }
 
    std::memset(address, 0, size);
-   address->sa_family = static_cast<sa_family_t>(it->second->domain());
+   address->sa_family = static_cast<sa_family_t>(bridge->domain());
    *length = static_cast<ares_socklen_t>(size);
+   return 0;
+}
+
+//
+// A local address to send from would be one for anyhttp's UDP socket, and the connection does not
+// take one, so a socket of ours is not bound at all: a channel with a local address set sends from
+// wherever the system routes it.
+//
+inline int quic_transport::on_bind(ares_socket_t fd, const struct sockaddr* address,
+                                   ares_socklen_t length)
+{
+   if (!find(fd))
+      return ::bind(fd, address, length);
+
    return 0;
 }
 
 // --------------------------------------------------------------------------------------------------
 
 //
-// The C side of it. Reads and writes are on c-ares' end of the socketpair, as they would be on a
-// TCP socket.
+// The C side of it.
 //
 inline const struct ares_socket_functions_ex& quic_transport::functions()
 {
@@ -606,13 +682,9 @@ inline const struct ares_socket_functions_ex& quic_transport::functions()
          return static_cast<quic_transport*>(data)->on_close(fd);
       },
 
-      //
-      // Fast open is turned down, as everywhere else, see socket_functions.hpp. What is left goes
-      // to the socketpair, which is where c-ares' end of things is.
-      //
       .asetsockopt = [](ares_socket_t fd, ares_socket_opt_t opt, const void* value,
-                        ares_socklen_t size, void*) -> int { //
-         return set_socket_option(fd, opt, value, size);
+                        ares_socklen_t size, void* data) -> int {
+         return static_cast<quic_transport*>(data)->on_setsockopt(fd, opt, value, size);
       },
 
       .aconnect = [](ares_socket_t fd, const struct sockaddr* address, ares_socklen_t length,
@@ -621,19 +693,15 @@ inline const struct ares_socket_functions_ex& quic_transport::functions()
       },
 
       .arecvfrom = [](ares_socket_t fd, void* buffer, size_t length, int, struct sockaddr* address,
-                      ares_socklen_t* address_len, void*) -> ares_ssize_t {
+                      ares_socklen_t* address_len, void* data) -> ares_ssize_t {
          if (address && address_len)
             *address_len = 0;
-         return ::recv(fd, buffer, length, 0);
+         return static_cast<quic_transport*>(data)->on_recv(fd, buffer, length);
       },
 
-      //
-      // Our end may be closed by the time c-ares writes, and that is to be a failed write, not a
-      // SIGPIPE.
-      //
       .asendto = [](ares_socket_t fd, const void* buffer, size_t length, int flags,
-                    const struct sockaddr*, ares_socklen_t, void*) -> ares_ssize_t {
-         return ::send(fd, buffer, length, flags | MSG_NOSIGNAL);
+                    const struct sockaddr*, ares_socklen_t, void* data) -> ares_ssize_t {
+         return static_cast<quic_transport*>(data)->on_send(fd, buffer, length, flags);
       },
 
       .agetsockname = [](ares_socket_t fd, struct sockaddr* address, ares_socklen_t* length,
@@ -641,13 +709,10 @@ inline const struct ares_socket_functions_ex& quic_transport::functions()
          return static_cast<quic_transport*>(data)->on_getsockname(fd, address, length);
       },
 
-      //
-      // A local address to send from would be one for anyhttp's UDP socket, and anyhttp has no way
-      // of being given one. Binding the socketpair to it would fail, so it is not done at all: a
-      // channel with a local address set sends from wherever the system routes it.
-      //
-      .abind = [](ares_socket_t, unsigned int, const struct sockaddr*, ares_socklen_t,
-                  void*) -> int { return 0; },
+      .abind = [](ares_socket_t fd, unsigned int, const struct sockaddr* address,
+                  ares_socklen_t length, void* data) -> int { //
+         return static_cast<quic_transport*>(data)->on_bind(fd, address, length);
+      },
 
       .aif_nametoindex = [](const char* name, void*) -> unsigned int {
          return ::if_nametoindex(name);

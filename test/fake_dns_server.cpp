@@ -116,6 +116,8 @@ struct fake_dns_server::state
 
    std::optional<anyhttp::server::Server> quic;
    bool quic_extra_message = false;
+   bool quic_hold = false;
+   std::vector<anyhttp::quic::Stream> quic_held; // the streams that set_quic_hold() keeps waiting
    std::size_t quic_connections = 0;
    std::vector<unsigned> quic_ids;
 #endif
@@ -294,6 +296,7 @@ fake_dns_server::~fake_dns_server()
    m_state->udp.close(ignored);
    m_state->acceptor.close(ignored);
 #if C_ARES_ASYNC_DOQ
+   m_state->quic_held.clear();
    m_state->quic.reset(); // stops listening, and ends every connection
 #endif
 }
@@ -304,6 +307,7 @@ void fake_dns_server::shutdown()
    error_code ignored;
    m_state->udp.close(ignored);
    m_state->acceptor.close(ignored);
+   m_state->quic_held.clear();
    m_state->quic.reset();
 }
 #endif
@@ -455,7 +459,7 @@ awaitable<void> fake_dns_server::state::serve_tcp(std::shared_ptr<state> self)
 
 void fake_dns_server::use_quic(const anyhttp::Executor& executor,
                                const test_certificate& certificate,
-                               std::chrono::nanoseconds idle_timeout)
+                               std::chrono::nanoseconds idle_timeout, std::uint64_t max_streams)
 {
    //
    // anyhttp has the defaults of a development server, and says so at the level of information:
@@ -483,7 +487,7 @@ void fake_dns_server::use_quic(const anyhttp::Executor& executor,
    //
    // The server keeps the handler, so the handler must not keep the state, which has the server.
    //
-   m_state->quic->on_quic({.alpn = "doq"},
+   m_state->quic->on_quic({.alpn = "doq", .max_streams = max_streams},
                           [weak = std::weak_ptr<state>(m_state)](
                              anyhttp::quic::Connection connection) -> anyhttp::Task<void> {
                              if (auto self = weak.lock())
@@ -497,6 +501,8 @@ std::string fake_dns_server::quic_address() const
 }
 
 void fake_dns_server::set_quic_extra_message(bool extra) { m_state->quic_extra_message = extra; }
+
+void fake_dns_server::set_quic_hold(bool hold) { m_state->quic_hold = hold; }
 
 std::size_t fake_dns_server::quic_connections() const { return m_state->quic_connections; }
 
@@ -539,6 +545,11 @@ anyhttp::Task<void> fake_dns_server::state::serve_quic_stream(std::shared_ptr<st
       co_return; // which resets the stream
 
    self->quic_ids.push_back((unsigned{query[2]} << 8) | query[3]);
+   if (self->quic_hold)
+   {
+      self->quic_held.push_back(std::move(stream));
+      co_return;
+   }
 
    auto reply = self->answer({query.data() + 2, query.size() - 2}, transport::quic);
    if (reply.empty())

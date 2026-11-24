@@ -95,7 +95,7 @@ or ``C_ARES_ASYNC_COROSIO`` (exactly one of which is 1, see :src:`include/c_ares
    * - :src:`include/c_ares_async/runtime.hpp`
      - the vocabulary of the interface, which picks ``asio/runtime.hpp`` or ``corosio/runtime.hpp``, and the name of the inline namespace, ``C_ARES_ASYNC_RUNTIME``
    * - :src:`include/c_ares_async/detail/event_loop.hpp`
-     - the event loop the implementation drives: ``Descriptor``, ``make_endpoint()`` and the ``LocalSocket`` of DNS over QUIC, again one file per runtime; the ``Timer`` is the runtime layer's
+     - the event loop the implementation drives: ``Descriptor`` and ``make_endpoint()``, again one file per runtime; the ``Timer`` is the runtime layer's
    * - :src:`include/c_ares_async/resolver.hpp`
      - the front end: the completion-token operations are ASIO-only
 

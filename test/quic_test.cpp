@@ -9,6 +9,7 @@
 
 #include <algorithm>
 #include <chrono>
+#include <cstdint>
 #include <cstdio>
 #include <cstdlib>
 #include <fstream>
@@ -58,7 +59,7 @@ protected:
       // On the resolver's executor, which is anyhttp's runtime: the server's own is Asio's on
       // Corosio as well, and the same context on Asio.
       //
-      server.use_quic(executor(), certificate, idle_timeout());
+      server.use_quic(executor(), certificate, idle_timeout(), max_streams());
       server.add_address("www.example.test", "192.0.2.1");
       server.add_https("www.example.test", 1, ".", {{ARES_SVCB_PARAM_ALPN, {2, 'h', '3'}}});
       server.add_address("mail.example.test", "192.0.2.2");
@@ -84,6 +85,7 @@ protected:
    }
 
    virtual std::chrono::nanoseconds idle_timeout() const { return std::chrono::seconds(30); }
+   virtual std::uint64_t max_streams() const { return 100; }
 
    //
    // As for DNS over TLS: the certificate is trusted by way of SSL_CERT_FILE, which anyhttp's
@@ -369,4 +371,70 @@ TEST_F(DnsOverQuicIdle, ConnectsAgainOnceTheConnectionHasTimedOut)
    EXPECT_FALSE(again) << again.message();
    EXPECT_THAT(more, ElementsAre(endpoint("192.0.2.2", 443)));
    EXPECT_EQ(server.quic_connections(), 2u);
+}
+
+// --------------------------------------------------------------------------------------------------
+
+class DnsOverQuicOneStream : public DnsOverQuic
+{
+protected:
+   std::uint64_t max_streams() const override { return 1; }
+};
+
+TEST_F(DnsOverQuicOneStream, SendsEachQueryOnceTheServerAllowsAnotherStream)
+{
+   make_resolver(quic({}, false));
+
+   std::optional<std::tuple<error_code, c_ares_async::resolver::results_type>> addresses;
+   std::optional<std::tuple<error_code, c_ares_async::resolver::https_results_type>> https;
+
+   start([](c_ares_async::resolver& resolver, auto& addresses) -> c_ares_async::Task<void> {
+      addresses = co_await resolver.resolve("www.example.test", "443");
+   }(*resolver, addresses));
+
+   start([](c_ares_async::resolver& resolver, auto& https) -> c_ares_async::Task<void> {
+      https = co_await resolver.resolve_https("www.example.test");
+   }(*resolver, https));
+
+   ASSERT_TRUE(run_until([&] { return addresses && https; }));
+
+   const auto& [ec, endpoints] = *addresses;
+   const auto& [https_ec, records] = *https;
+
+   EXPECT_FALSE(ec) << ec.message();
+   EXPECT_THAT(endpoints, ElementsAre(endpoint("192.0.2.1", 443)));
+   EXPECT_FALSE(https_ec) << https_ec.message();
+   EXPECT_EQ(records.size(), 1u);
+
+   //
+   // One stream at a time, and the next once the server allows it, which is a round trip after
+   // the answer on the one before -- not once c-ares has given up on the query and sent it again.
+   //
+   EXPECT_EQ(server.quic_connections(), 1u);
+   EXPECT_EQ(server.quic_ids().size(), 3u) << "A, AAAA and HTTPS, and each of them once";
+   EXPECT_FALSE(logged(log_level::debug, "query timeout"));
+}
+
+TEST_F(DnsOverQuicOneStream, LetsGoOfAQueryWaitingForAStreamWhenDestroyed)
+{
+   server.set_quic_hold(true);
+   make_resolver(quic({}, false));
+
+   std::optional<std::tuple<error_code, c_ares_async::resolver::results_type>> result;
+   start([](c_ares_async::resolver& resolver, auto& result) -> c_ares_async::Task<void> {
+      result = co_await resolver.resolve("www.example.test", "443");
+   }(*resolver, result));
+
+   //
+   // The one stream there is has the first query on it, which is never answered, and the second
+   // waits for another stream when the resolver goes.
+   //
+   ASSERT_TRUE(run_until([&] { return !server.quic_ids().empty(); }));
+   std::ignore = run_until([] { return false; }, std::chrono::milliseconds(50));
+   EXPECT_EQ(server.quic_ids().size(), 1u);
+   resolver.reset();
+
+   ASSERT_TRUE(run_until([&] { return result.has_value(); }));
+   EXPECT_EQ(std::get<0>(*result), c_ares_async::errors::canceled);
+   std::ignore = run_until([] { return false; }, std::chrono::milliseconds(100));
 }

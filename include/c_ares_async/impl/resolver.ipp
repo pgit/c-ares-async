@@ -23,6 +23,7 @@
 #include <optional>
 #include <tuple>
 #include <utility>
+#include <variant>
 
 namespace c_ares_async::inline C_ARES_ASYNC_RUNTIME
 {
@@ -33,14 +34,47 @@ namespace c_ares_async::inline C_ARES_ASYNC_RUNTIME
 // One socket c-ares has opened. The event loop is only used to wait for readiness on it -- the
 // socket itself belongs to c-ares, which is why the descriptor is detached again, never closed.
 //
+// One of DNS over QUIC's is no socket of the system's, and says itself when it is ready: it is
+// waited on with a descriptor of the transport's, which has the same three calls, see
+// detail/quic_transport.hpp.
+//
 struct resolver::socket_watch
 {
-   socket_watch(const Executor& executor, ares_socket_t fd) : fd(fd), descriptor(executor, fd) {}
+#if C_ARES_ASYNC_DOQ
+   using descriptor_type = std::variant<detail::Descriptor, detail::quic_transport::descriptor>;
 
-   void detach() { descriptor.detach(); }
+   socket_watch(detail::quic_transport::descriptor quic, ares_socket_t fd)
+      : fd(fd), descriptor(std::in_place_type<detail::quic_transport::descriptor>, std::move(quic))
+   {
+   }
+#else
+   using descriptor_type = std::variant<detail::Descriptor>;
+#endif
+
+   socket_watch(const Executor& executor, ares_socket_t fd)
+      : fd(fd), descriptor(std::in_place_type<detail::Descriptor>, executor, fd)
+   {
+   }
+
+   bool is_open() const
+   {
+      return std::visit([](const auto& descriptor) { return descriptor.is_open(); }, descriptor);
+   }
+
+   void detach()
+   {
+      std::visit([](auto& descriptor) { descriptor.detach(); }, descriptor);
+   }
+
+   template <typename F>
+   void wait(detail::wait_type type, F&& on_ready)
+   {
+      std::visit([&](auto& descriptor) { descriptor.wait(type, std::forward<F>(on_ready)); },
+                 descriptor);
+   }
 
    ares_socket_t fd;
-   detail::Descriptor descriptor;
+   descriptor_type descriptor;
 
    bool want_read = false; // what c-ares is interested in
    bool want_write = false; //
@@ -529,7 +563,12 @@ inline void resolver::on_socket_state(ares_socket_t fd, bool readable, bool writ
       //
       try
       {
-         socket = std::make_shared<socket_watch>(m_executor, fd);
+#if C_ARES_ASYNC_DOQ
+         if (auto quic = m_quic ? m_quic->find_descriptor(fd) : std::nullopt)
+            socket = std::make_shared<socket_watch>(std::move(*quic), fd);
+#endif
+         if (!socket)
+            socket = std::make_shared<socket_watch>(m_executor, fd);
       }
       catch (const std::exception& error)
       {
@@ -546,7 +585,7 @@ inline void resolver::on_socket_state(ares_socket_t fd, bool readable, bool writ
 
 inline void resolver::arm(const std::shared_ptr<socket_watch>& socket)
 {
-   if (!socket->descriptor.is_open())
+   if (!socket->is_open())
       return;
 
    //
@@ -571,21 +610,21 @@ inline void resolver::arm(const std::shared_ptr<socket_watch>& socket)
    if (want_read && !socket->waiting_read)
    {
       socket->waiting_read = true;
-      socket->descriptor.wait(detail::wait_type::read,
-                              [this, weak = std::weak_ptr(socket)](const error_code& ec) {
-                                 if (const auto socket = weak.lock())
-                                    on_socket_event(socket, ARES_FD_EVENT_READ, ec);
-                              });
+      socket->wait(detail::wait_type::read,
+                   [this, weak = std::weak_ptr(socket)](const error_code& ec) {
+                      if (const auto socket = weak.lock())
+                         on_socket_event(socket, ARES_FD_EVENT_READ, ec);
+                   });
    }
 
    if (want_write && !socket->waiting_write)
    {
       socket->waiting_write = true;
-      socket->descriptor.wait(detail::wait_type::write,
-                              [this, weak = std::weak_ptr(socket)](const error_code& ec) {
-                                 if (const auto socket = weak.lock())
-                                    on_socket_event(socket, ARES_FD_EVENT_WRITE, ec);
-                              });
+      socket->wait(detail::wait_type::write,
+                   [this, weak = std::weak_ptr(socket)](const error_code& ec) {
+                      if (const auto socket = weak.lock())
+                         on_socket_event(socket, ARES_FD_EVENT_WRITE, ec);
+                   });
    }
 }
 
