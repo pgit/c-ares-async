@@ -143,7 +143,8 @@ c-ares had given up on them and sent them again (`anyhttp#53
 <https://github.com/pgit/anyhttp/pull/55>`__ has it wait for the server to allow another stream, and
 serve those that wait in the order they started; what it used to be is ``try_open_stream()`` now.
 
-The pin is at the merge of anyhttp#55, which came after `anyhttp#51
+The pin is at the merge of `anyhttp#56 <https://github.com/pgit/anyhttp/pull/56>`__, which gives
+``quic::Config`` a local address and a device to send from, after anyhttp#55 and `anyhttp#51
 <https://github.com/pgit/anyhttp/pull/51>`__: that one moved anyhttp's Capy and Corosio to the
 commits this library pins.
 
@@ -159,9 +160,9 @@ What is not there
 * **0-RTT and session resumption,** which anyhttp's client does not do: every connection is a full
   handshake, which ``ARES_FLAG_STAYOPEN`` keeps to one per server, until the connection idles out
   -- after 30 seconds, or what the server says.
-* **A local address to send from.** anyhttp's ``quic::connect()`` has no way of being given one,
-  so a socket of the transport's is not bound, and a channel with a local address set sends from
-  wherever the system routes the datagrams.
+* **A local address to send from.** anyhttp's ``quic::connect()`` takes one now, but the bridge
+  does not pass one on, so a socket of the transport's is not bound, and a channel with a local
+  address set sends from wherever the system routes the datagrams.
 
 anyhttp logs to spdlog's default logger, at the level of information for every connection it
 makes: a program that does not want that sets the level, as :src:`test/fake_dns_server.cpp` does.

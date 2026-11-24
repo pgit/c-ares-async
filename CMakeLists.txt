@@ -167,11 +167,12 @@ endif()
 
 #
 # anyhttp, for its QUIC. Pinned, as Capy and Corosio are: at the merge of
-# https://github.com/pgit/anyhttp/pull/55, with which open_stream() waits for the server to allow
-# another stream. https://github.com/pgit/anyhttp/pull/51 before that moved its Capy and Corosio
-# to the pins above, and https://github.com/pgit/anyhttp/pull/50 is what DNS over QUIC needs of
-# quic::connect() -- connecting to an address while verifying the certificate for a name given
-# apart from it, and not verifying at all. It fetches Capy and Boost.HTTP in turn, which its
+# https://github.com/pgit/anyhttp/pull/56, with which quic::Config takes a local address and a
+# device to send from. https://github.com/pgit/anyhttp/pull/55 before that has open_stream() wait
+# for the server to allow another stream, https://github.com/pgit/anyhttp/pull/51 moved its Capy
+# and Corosio to the pins above, and https://github.com/pgit/anyhttp/pull/50 is what DNS over QUIC
+# needs of quic::connect() -- connecting to an address while verifying the certificate for a name
+# given apart from it, and not verifying at all. It fetches Capy and Boost.HTTP in turn, which its
 # HTTP/1.1 is built on, and on Corosio Corosio, at pins of its own where nobody has declared them
 # before. As a subproject it is the library and nothing else -- no tests, no programs, no install
 # rules.
@@ -201,7 +202,7 @@ if (C_ARES_ASYNC_DOQ)
         FetchContent_Declare(
             anyhttp
             GIT_REPOSITORY https://github.com/pgit/anyhttp.git
-            GIT_TAG 1939bef6ea401246d487ef4fd3fa846a03da44a0
+            GIT_TAG 132c526c77994447a4d9bf9bc15800e9caa71476
             EXCLUDE_FROM_ALL)
         FetchContent_MakeAvailable(anyhttp)
     elseif (DEFINED ANYHTTP_API AND NOT ANYHTTP_API STREQUAL C_ARES_ASYNC_API)
