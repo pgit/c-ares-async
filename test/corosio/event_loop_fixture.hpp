@@ -9,7 +9,8 @@
 // Asio's either way (it serves UDP, TCP and TLS, and porting a test server to a second
 // runtime would only put a second thing to keep right next to the first). Both are stepped from
 // the one thread the test runs on, so the tests stay as deterministic as they are on Asio -- a
-// server on a thread of its own would race whoever looks at what it was asked.
+// server on a thread of its own would race whoever looks at what it was asked. The server's DNS
+// over QUIC is the exception: that is anyhttp's, on the resolver's loop.
 //
 #pragma once
 

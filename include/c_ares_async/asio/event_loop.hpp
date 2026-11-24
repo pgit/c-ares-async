@@ -8,6 +8,7 @@
 
 #include <c_ares_async/runtime.hpp>
 
+#include <boost/asio/local/stream_protocol.hpp>
 #include <boost/asio/posix/stream_descriptor.hpp>
 
 #include <netinet/in.h>
@@ -75,6 +76,34 @@ public:
 private:
    boost::asio::posix::stream_descriptor descriptor_;
 };
+
+//
+// Our end of a socketpair() that c-ares has the other end of, for what it takes to be a TCP
+// connection: that is how DNS over QUIC gets to c-ares, see quic_transport.hpp. A Unix domain
+// stream socket of the runtime's own, made from the executor, which closes the descriptor it has
+// adopted when it is closed or destroyed.
+//
+using LocalSocket = boost::asio::local::stream_protocol::socket;
+
+//
+// Has 'socket' take 'fd', which it closes from then on. Where that fails, 'fd' is still the
+// caller's.
+//
+inline error_code adopt_socket(LocalSocket& socket, int fd) noexcept
+{
+   error_code ec;
+   socket.assign(boost::asio::local::stream_protocol(), fd, ec);
+   return ec;
+}
+
+//
+// Closes 'socket', which completes what is pending on it with an error.
+//
+inline void close_socket(LocalSocket& socket) noexcept
+{
+   error_code ignored;
+   socket.close(ignored);
+}
 
 //
 // The bytes of an IPv4 or IPv6 address, as the text of it. What c-ares hands over in the
