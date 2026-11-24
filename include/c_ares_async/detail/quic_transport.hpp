@@ -3,7 +3,8 @@
 
 //
 // DNS over QUIC (RFC 9250) for c-ares, with anyhttp's QUIC. Only where C_ARES_ASYNC_DOQ is 1,
-// which c_ares_async::doq defines, and on Asio: without it, this header is empty.
+// which c_ares_async::doq defines: without it, this header is empty. With it, on either runtime --
+// the one anyhttp is built for, which has to be the one of the translation unit.
 //
 // c-ares has DNS over TCP, which is length-prefixed messages on a byte stream, and DoQ is the same
 // messages with the same prefix, one on each QUIC stream of its own (RFC 9250, section 4.2). So
@@ -26,10 +27,16 @@
 
 #include <c_ares_async/runtime.hpp>
 
-#if C_ARES_ASYNC_DOQ && C_ARES_ASYNC_ASIO
+#if C_ARES_ASYNC_DOQ
 
 #include <c_ares_async/logging.hpp>
 #include <c_ares_async/tls_options.hpp>
+
+#include <anyhttp/runtime.hpp>
+
+#if ANYHTTP_COROSIO != C_ARES_ASYNC_COROSIO
+#error "C_ARES_ASYNC_DOQ: anyhttp is built for the other runtime than this translation unit's"
+#endif
 
 #include <ares.h>
 
@@ -95,4 +102,4 @@ private:
 
 #include <c_ares_async/impl/quic_transport.ipp>
 
-#endif // C_ARES_ASYNC_DOQ && C_ARES_ASYNC_ASIO
+#endif // C_ARES_ASYNC_DOQ

@@ -3,7 +3,7 @@
 
 //
 // DNS over QUIC (RFC 9250), against anyhttp's server with a certificate made up for the occasion.
-// Only built where the tests are on c_ares_async::doq.
+// Only built where the tests are on c_ares_async::doq, on either runtime.
 //
 #include "resolver_fixture.hpp"
 
@@ -54,7 +54,11 @@ class DnsOverQuic : public event_loop_fixture
 protected:
    void SetUp() override
    {
-      server.use_quic(certificate, idle_timeout());
+      //
+      // On the resolver's executor, which is anyhttp's runtime: the server's own is Asio's on
+      // Corosio as well, and the same context on Asio.
+      //
+      server.use_quic(executor(), certificate, idle_timeout());
       server.add_address("www.example.test", "192.0.2.1");
       server.add_https("www.example.test", 1, ".", {{ARES_SVCB_PARAM_ALPN, {2, 'h', '3'}}});
       server.add_address("mail.example.test", "192.0.2.2");
@@ -65,7 +69,8 @@ protected:
       //
       // The resolver, the server, and then whatever they leave on the context, until there is
       // nothing left: QUIC connections that are closing, mostly. Destroyed with that pending, the
-      // context would not free what anyhttp holds on to until it is through.
+      // context would not free what anyhttp holds on to until it is through. That is the
+      // resolver's context, on either runtime, which is where anyhttp's side of the server is.
       //
       resolver.reset();
       server.shutdown();

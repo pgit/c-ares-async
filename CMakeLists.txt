@@ -79,7 +79,8 @@ set_property(CACHE C_ARES_ASYNC_TLS PROPERTY STRINGS OpenSSL AWS-LC)
 #
 # c-ares has no DNS over QUIC either -- see detail/quic_transport.hpp. That one takes a QUIC stack,
 # which is anyhttp's: it is fetched and built as part of this build, on the runtime and TLS library
-# chosen here, and is what c_ares_async::doq adds to c_ares_async::asio. Asio only, for now.
+# chosen here, and is what c_ares_async::doq adds to the target of that runtime. On Corosio,
+# anyhttp takes OpenSSL only.
 #
 option(C_ARES_ASYNC_DOQ "Add DNS over QUIC (RFC 9250), with anyhttp's QUIC: c_ares_async::doq" OFF)
 
@@ -109,7 +110,8 @@ elseif (C_ARES_ASYNC_API STREQUAL "COROSIO")
     # are not installed along with the headers -- a consumer of the installed package that uses
     # Corosio brings its own.
     #
-    # The pins are anyhttp's, at the commit anyhttp is pinned at below, so that they move together.
+    # The pins are anyhttp's, at the commit pinned below: with C_ARES_ASYNC_DOQ, anyhttp is built
+    # on these two, as they are declared first, and its own declarations of them are not used.
     #
     if (NOT TARGET Boost::corosio OR NOT TARGET Boost::capy)
         include(FetchContent)
@@ -169,17 +171,27 @@ endif()
 # https://github.com/pgit/anyhttp/pull/50 before that is what DNS over QUIC needs of
 # quic::connect() -- connecting to an address while verifying the certificate for a name given
 # apart from it, and not verifying at all. It fetches Capy and Boost.HTTP in turn, which its
-# HTTP/1.1 is built on, at pins of its own. As a subproject it is the library and nothing else --
-# no tests, no programs, no install rules.
+# HTTP/1.1 is built on, and on Corosio Corosio, at pins of its own where nobody has declared them
+# before. As a subproject it is the library and nothing else -- no tests, no programs, no install
+# rules.
+#
+# anyhttp is built for one runtime, and that is the one of this build. Where whoever brought this
+# in has made anyhttp::anyhttp already, it is theirs, and detail/quic_transport.hpp checks that it
+# is built for the runtime of the translation unit.
 #
 if (C_ARES_ASYNC_DOQ)
-    if (NOT C_ARES_ASYNC_API STREQUAL "ASIO")
-        message(FATAL_ERROR "C_ARES_ASYNC_DOQ needs C_ARES_ASYNC_API=ASIO")
+    #
+    # Corosio's openssl_stream, which anyhttp's Corosio build has, uses the zero-copy BIO pair API
+    # (BIO_nwrite0), which AWS-LC lacks.
+    #
+    if (C_ARES_ASYNC_API STREQUAL "COROSIO" AND NOT C_ARES_ASYNC_TLS STREQUAL "OpenSSL")
+        message(FATAL_ERROR "C_ARES_ASYNC_DOQ on Corosio needs C_ARES_ASYNC_TLS=OpenSSL, as "
+                            "anyhttp's Corosio build does not take AWS-LC")
     endif()
 
     if (NOT TARGET anyhttp::anyhttp)
         include(FetchContent)
-        set(ANYHTTP_API "ASIO" CACHE STRING "" FORCE)
+        set(ANYHTTP_API "${C_ARES_ASYNC_API}" CACHE STRING "" FORCE)
         # the very same TLS library, which ngtcp2's crypto backend has to agree with
         set(TLS_LIBRARY "${C_ARES_ASYNC_TLS}" CACHE STRING "" FORCE)
         if (C_ARES_ASYNC_TLS STREQUAL "AWS-LC" AND DEFINED ssl_ROOT)
@@ -191,6 +203,9 @@ if (C_ARES_ASYNC_DOQ)
             GIT_TAG 9b308b6028e9dfc22a749f19ff88a9ee530ffac2
             EXCLUDE_FROM_ALL)
         FetchContent_MakeAvailable(anyhttp)
+    elseif (DEFINED ANYHTTP_API AND NOT ANYHTTP_API STREQUAL C_ARES_ASYNC_API)
+        message(FATAL_ERROR "anyhttp::anyhttp is built for ANYHTTP_API=${ANYHTTP_API}, and "
+                            "C_ARES_ASYNC_DOQ needs it for C_ARES_ASYNC_API=${C_ARES_ASYNC_API}")
     endif()
 endif()
 
@@ -256,23 +271,25 @@ if (TARGET Boost::corosio AND TARGET Boost::capy)
 endif()
 
 #
-# DNS over QUIC, on top of c_ares_async::asio: anyhttp, and the macro that has the headers use it.
-# Every translation unit of a program that makes a resolver has to agree on that macro, so a
-# program that uses this target uses it everywhere instead of c_ares_async::asio. It is not
-# installed: anyhttp is built as part of this build, and only for it.
-#
-if (C_ARES_ASYNC_DOQ AND TARGET c_ares_async_asio)
-    add_library(c_ares_async_doq INTERFACE)
-    add_library(c_ares_async::doq ALIAS c_ares_async_doq)
-    target_link_libraries(c_ares_async_doq INTERFACE c_ares_async_asio anyhttp::anyhttp)
-    target_compile_definitions(c_ares_async_doq INTERFACE C_ARES_ASYNC_DOQ=1)
-endif()
-
-#
 # What the tests, the examples and the snippets link: the runtime of this build tree, which is
 # also the name of the directories that what belongs to one runtime only lives in.
 #
 string(TOLOWER ${C_ARES_ASYNC_API} c_ares_async_runtime)
+
+#
+# DNS over QUIC, on top of the target of this build's runtime -- c_ares_async::asio or
+# c_ares_async::corosio, which is what anyhttp is built for: anyhttp, and the macro that has the
+# headers use it. Every translation unit of a program that makes a resolver of that runtime has to
+# agree on that macro, so a program that uses this target uses it everywhere instead of the
+# runtime's. It is not installed: anyhttp is built as part of this build, and only for it.
+#
+if (C_ARES_ASYNC_DOQ AND TARGET c_ares_async_${c_ares_async_runtime})
+    add_library(c_ares_async_doq INTERFACE)
+    add_library(c_ares_async::doq ALIAS c_ares_async_doq)
+    target_link_libraries(c_ares_async_doq INTERFACE c_ares_async_${c_ares_async_runtime}
+                                                     anyhttp::anyhttp)
+    target_compile_definitions(c_ares_async_doq INTERFACE C_ARES_ASYNC_DOQ=1)
+endif()
 
 #
 # And the target they link for it: the runtime's own, or c_ares_async::doq, which is the same with

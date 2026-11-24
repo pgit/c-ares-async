@@ -8,6 +8,9 @@
 //    wait_type, Descriptor   -- readiness on a descriptor of c-ares', which it keeps owning
 //    address_text()          -- the text of an address that c-ares hands over in its wire format
 //    make_endpoint()         -- a TcpEndpoint of the runtime's own, from a sockaddr of c-ares'
+//    LocalSocket, adopt_socket(), close_socket()
+//                            -- our end of a socketpair() that c-ares has the other end of, which
+//                               is how DNS over QUIC gets to it, see quic_transport.hpp
 //
 // The timer that ares_timeout() asks for is the runtime layer's, detail::Timer.
 //

@@ -95,7 +95,7 @@ or ``C_ARES_ASYNC_COROSIO`` (exactly one of which is 1, see :src:`include/c_ares
    * - :src:`include/c_ares_async/runtime.hpp`
      - the vocabulary of the interface, which picks ``asio/runtime.hpp`` or ``corosio/runtime.hpp``, and the name of the inline namespace, ``C_ARES_ASYNC_RUNTIME``
    * - :src:`include/c_ares_async/detail/event_loop.hpp`
-     - the event loop the implementation drives: ``Descriptor`` and ``make_endpoint()``, again one file per runtime; the ``Timer`` is the runtime layer's
+     - the event loop the implementation drives: ``Descriptor``, ``make_endpoint()`` and the ``LocalSocket`` of DNS over QUIC, again one file per runtime; the ``Timer`` is the runtime layer's
    * - :src:`include/c_ares_async/resolver.hpp`
      - the front end: the completion-token operations are ASIO-only
 
@@ -108,7 +108,8 @@ has a version per runtime instead: :src:`example/asio/minimal.cpp` and
 :src:`example/corosio/minimal.cpp`.
 
 Everything else -- the lookups, the HTTPS records, the server lists, the DNS over TLS transport --
-is written once, against those names. ``asio/runtime.hpp`` documents each of them and
+is written once, against those names. So is the DNS over QUIC transport, which goes through
+anyhttp's runtime layer itself for what it does on the runtime, see :doc:`dns-over-quic`. ``asio/runtime.hpp`` documents each of them and
 ``corosio/runtime.hpp`` has the same definitions in the same order, so the pair can be read side by
 side; the same goes for ``asio/event_loop.hpp`` and ``corosio/event_loop.hpp``, and for the test
 fixtures in ``test/asio/`` and ``test/corosio/``. What is written once is in the inline namespace of
@@ -132,7 +133,8 @@ for stop tokens and ``corosio::timeout()``. A COROSIO build has both runtimes, w
 The fake DNS server stays on Asio in both: it serves UDP, TCP and TLS, and a second
 implementation of it would only be a second thing to keep right. The COROSIO fixture steps its
 ``asio::io_context`` and the resolver's ``corosio::io_context`` from the one thread the test runs on,
-so the tests stay as deterministic as they are on Asio.
+so the tests stay as deterministic as they are on Asio. Its DNS over QUIC is anyhttp's server, which
+runs on the runtime anyhttp is built for, and so on the resolver's context.
 
 What the port found
 -------------------

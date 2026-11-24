@@ -50,7 +50,8 @@ endif()
 
 #
 # DNS over QUIC, where the tests are on c_ares_async::doq: the fake server speaks it with anyhttp's
-# server, which comes with anyhttp along with the client.
+# server, which comes with anyhttp along with the client, and runs on anyhttp's runtime -- the
+# resolver's loop, on Corosio.
 #
 if (TARGET c_ares_async::doq)
     target_sources(c_ares_async_tests PRIVATE quic_test.cpp)

@@ -5,7 +5,8 @@
 // A DNS server on the loopback interface that answers from a table, for a resolver to be pointed
 // at. It speaks UDP, TCP and, once it has a certificate, DNS over TLS -- all on one port, as
 // c-ares has a single port for a server whichever way it asks. Where the tests are built with
-// DNS over QUIC, it speaks that as well, with anyhttp's server, on a port of its own.
+// DNS over QUIC, it speaks that as well, with anyhttp's server, on a port of its own -- and on
+// the runtime anyhttp is built for, which is the one of the tests, where the rest is on Asio.
 //
 // The messages are taken apart and put together by c-ares' own record functions, so the tests do
 // not come with a second implementation of the wire format to keep right.
@@ -15,6 +16,10 @@
 #include "test_certificate.hpp"
 
 #include <boost/asio/any_io_executor.hpp>
+
+#if C_ARES_ASYNC_DOQ
+#include <anyhttp/runtime.hpp>
+#endif
 
 #include <chrono>
 
@@ -93,9 +98,11 @@ public:
 #if C_ARES_ASYNC_DOQ
    //
    // Starts serving DNS over QUIC on a port of its own, the server presenting 'certificate', and
-   // dropping a connection that has been quiet for 'idle_timeout'.
+   // dropping a connection that has been quiet for 'idle_timeout'. It runs on 'executor', which is
+   // anyhttp's runtime's: the one the server was made with on Asio, and the resolver's loop on
+   // Corosio, which the tests step from the same thread as the server's.
    //
-   void use_quic(const test_certificate& certificate,
+   void use_quic(const anyhttp::Executor& executor, const test_certificate& certificate,
                  std::chrono::nanoseconds idle_timeout = std::chrono::seconds(30));
 
    //

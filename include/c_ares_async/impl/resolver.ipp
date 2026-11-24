@@ -326,7 +326,7 @@ inline resolver::resolver(executor_type executor, const tls_options& tls)
 
       if (tls.enabled && tls.quic)
       {
-#if C_ARES_ASYNC_DOQ && C_ARES_ASYNC_ASIO
+#if C_ARES_ASYNC_DOQ
          m_quic = std::make_shared<detail::quic_transport>(m_executor, tls, m_logger);
          m_quic->install(m_channel); // before the channel has had a chance to open anything
 

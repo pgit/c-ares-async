@@ -106,10 +106,13 @@ struct fake_dns_server::state
    static awaitable<void> serve_stream(std::shared_ptr<state> self, Stream& stream, transport via);
 
 #if C_ARES_ASYNC_DOQ
-   static awaitable<void> serve_quic(std::shared_ptr<state> self,
-                                     anyhttp::quic::Connection connection);
-   static awaitable<void> serve_quic_stream(std::shared_ptr<state> self,
-                                            anyhttp::quic::Stream stream);
+   //
+   // On anyhttp's runtime, which is not Asio's in a COROSIO build.
+   //
+   static anyhttp::Task<void> serve_quic(std::shared_ptr<state> self,
+                                         anyhttp::quic::Connection connection);
+   static anyhttp::Task<void> serve_quic_stream(std::shared_ptr<state> self,
+                                                anyhttp::quic::Stream stream);
 
    std::optional<anyhttp::server::Server> quic;
    bool quic_extra_message = false;
@@ -450,7 +453,8 @@ awaitable<void> fake_dns_server::state::serve_tcp(std::shared_ptr<state> self)
 
 #if C_ARES_ASYNC_DOQ
 
-void fake_dns_server::use_quic(const test_certificate& certificate,
+void fake_dns_server::use_quic(const anyhttp::Executor& executor,
+                               const test_certificate& certificate,
                                std::chrono::nanoseconds idle_timeout)
 {
    //
@@ -468,12 +472,11 @@ void fake_dns_server::use_quic(const test_certificate& certificate,
    std::ofstream(chain) << certificate.certificate_pem;
    std::ofstream(key) << certificate.key_pem;
 
-   m_state->quic.emplace(m_state->udp.get_executor(),
-                         anyhttp::server::Config{.listen_address = "127.0.0.1",
-                                                 .port = 0,
-                                                 .tls_certificate_chain = chain,
-                                                 .tls_private_key = key,
-                                                 .idle_timeout = idle_timeout});
+   m_state->quic.emplace(executor, anyhttp::server::Config{.listen_address = "127.0.0.1",
+                                                           .port = 0,
+                                                           .tls_certificate_chain = chain,
+                                                           .tls_private_key = key,
+                                                           .idle_timeout = idle_timeout});
    std::remove(chain.c_str());
    std::remove(key.c_str());
 
@@ -482,7 +485,7 @@ void fake_dns_server::use_quic(const test_certificate& certificate,
    //
    m_state->quic->on_quic({.alpn = "doq"},
                           [weak = std::weak_ptr<state>(m_state)](
-                             anyhttp::quic::Connection connection) -> awaitable<void> {
+                             anyhttp::quic::Connection connection) -> anyhttp::Task<void> {
                              if (auto self = weak.lock())
                                 co_await state::serve_quic(std::move(self), std::move(connection));
                           });
@@ -503,8 +506,8 @@ const std::vector<unsigned>& fake_dns_server::quic_ids() const { return m_state-
 // RFC 9250: the client opens a stream for every query, and the server does nothing but answer on
 // it. The connection is over when the handler returns, so it waits for the client to end it.
 //
-awaitable<void> fake_dns_server::state::serve_quic(std::shared_ptr<state> self,
-                                                   anyhttp::quic::Connection connection)
+anyhttp::Task<void> fake_dns_server::state::serve_quic(std::shared_ptr<state> self,
+                                                       anyhttp::quic::Connection connection)
 {
    ++self->quic_connections;
    for (;;)
@@ -513,12 +516,12 @@ awaitable<void> fake_dns_server::state::serve_quic(std::shared_ptr<state> self,
       if (ec)
          co_return;
 
-      co_spawn(connection.get_executor(), serve_quic_stream(self, std::move(stream)), detached);
+      anyhttp::launch(connection.get_executor(), serve_quic_stream(self, std::move(stream)));
    }
 }
 
-awaitable<void> fake_dns_server::state::serve_quic_stream(std::shared_ptr<state> self,
-                                                          anyhttp::quic::Stream stream)
+anyhttp::Task<void> fake_dns_server::state::serve_quic_stream(std::shared_ptr<state> self,
+                                                              anyhttp::quic::Stream stream)
 {
    std::vector<unsigned char> query;
    std::array<unsigned char, 4096> buffer;

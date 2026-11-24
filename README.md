@@ -148,7 +148,7 @@ include those of the TLS library, which is how they tell OpenSSL and AWS-LC apar
 | --- | --- | --- |
 | `C_ARES_ASYNC_API` | `ASIO` | The I/O runtime to build the tests and examples on, `ASIO` or `COROSIO`, see [doc/corosio.rst](doc/corosio.rst). A COROSIO build fetches Capy and Corosio, unless they are there already. The runtime targets are there wherever their runtime is, whichever this is. |
 | `C_ARES_ASYNC_TLS` | `OpenSSL` | The TLS library that the targets link, `OpenSSL` or `AWS-LC`. `ssl_ROOT` says where the latter is installed. |
-| `C_ARES_ASYNC_DOQ` | `OFF` | Adds DNS over QUIC: fetches and builds anyhttp, for its QUIC (and with it Capy and Boost.HTTP), and makes the target `c_ares_async::doq`, which the tests and examples then link. Asio only, and not installed. See [doc/dns-over-quic.rst](doc/dns-over-quic.rst). |
+| `C_ARES_ASYNC_DOQ` | `OFF` | Adds DNS over QUIC: fetches and builds anyhttp, for its QUIC (and with it Capy and Boost.HTTP), and makes the target `c_ares_async::doq`, which the tests and examples then link. On either runtime, on Corosio with OpenSSL only, and not installed. See [doc/dns-over-quic.rst](doc/dns-over-quic.rst). |
 | `C_ARES_ASYNC_BUILD_TESTS` | top-level only | Builds the tests. Also off where `BUILD_TESTING` is. |
 | `C_ARES_ASYNC_BUILD_EXAMPLES` | top-level only | Builds the examples. |
 | `C_ARES_ASYNC_BUILD_DOCS` | top-level only | Builds the code of the guide, and adds the `docs` target where there is a `doxygen` and a `sphinx-build` to make them with. |

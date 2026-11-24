@@ -100,6 +100,19 @@
             }
         },
         {
+            "name": "doq-corosio",
+            "displayName": "DNS over QUIC on Corosio",
+            "description": "DNS over QUIC with the tests and examples on Corosio, in build-doq-corosio/: anyhttp is built for Corosio, on Capy and Corosio at the commits CMakeLists.txt pins, and against the system's OpenSSL, as anyhttp does not take AWS-LC on Corosio",
+            "inherits": "devcontainer",
+            "binaryDir": "${sourceDir}/build-doq-corosio",
+            "cacheVariables": {
+                "CMAKE_BUILD_TYPE": "Debug",
+                "C_ARES_ASYNC_API": "COROSIO",
+                "C_ARES_ASYNC_DOQ": "ON",
+                "C_ARES_ASYNC_TLS": "OpenSSL"
+            }
+        },
+        {
             "name": "openssl",
             "displayName": "OpenSSL",
             "description": "The system's OpenSSL instead of AWS-LC",
@@ -174,6 +187,10 @@
             "configurePreset": "doq"
         },
         {
+            "name": "doq-corosio",
+            "configurePreset": "doq-corosio"
+        },
+        {
             "name": "openssl",
             "configurePreset": "openssl"
         },
@@ -221,6 +238,11 @@
         {
             "name": "doq",
             "configurePreset": "doq",
+            "inherits": "base"
+        },
+        {
+            "name": "doq-corosio",
+            "configurePreset": "doq-corosio",
             "inherits": "base"
         },
         {

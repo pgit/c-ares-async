@@ -12,9 +12,10 @@ QUIC streams next to HTTP/3, on ngtcp2.
 
 It is not there by default. ``-DC_ARES_ASYNC_DOQ=ON`` fetches and builds anyhttp, at the commit
 :src:`CMakeLists.txt` pins -- and with it Capy and Boost.HTTP, which anyhttp's HTTP/1.1 is built on,
-at pins of anyhttp's -- and makes the target ``c_ares_async::doq``: ``c_ares_async::asio``
-with anyhttp and ``C_ARES_ASYNC_DOQ=1``. A resolver from a translation unit compiled with that
-takes :cpp:member:`tls_options::quic`:
+at pins of anyhttp's -- for the runtime that ``C_ARES_ASYNC_API`` chooses, and makes the target
+``c_ares_async::doq``: ``c_ares_async::asio`` or ``c_ares_async::corosio``, with anyhttp and
+``C_ARES_ASYNC_DOQ=1``. A resolver from a translation unit compiled with that takes
+:cpp:member:`tls_options::quic`:
 
 .. code-block:: cpp
 
@@ -70,6 +71,49 @@ stream that has not been answered, end on the executor after the resolver has go
 itself alive for that, and does not touch the resolver, or its logger, from the moment c-ares has
 closed the socket.
 
+The bridge is written once, for both runtimes. What it does on the runtime goes through anyhttp's
+runtime layer, which it is only ever compiled with: ``launch()`` to start its coroutines,
+``io::read_some()`` and ``io::write()`` on its end of the socketpair, and ``when_either()`` with an
+``Event`` to give up a connection that is still being made when c-ares closes the socket. Its end
+of the socketpair is the event loop's ``LocalSocket``, a Unix domain socket of the runtime's own.
+
+On Corosio
+----------
+
+anyhttp is built for one runtime, and here that is the one of the build:
+``-DC_ARES_ASYNC_API=COROSIO -DC_ARES_ASYNC_DOQ=ON`` builds it for Corosio, and makes
+``c_ares_async::doq`` from ``c_ares_async::corosio``. The ``doq-corosio`` preset does that, in
+``build-doq-corosio/``:
+
+.. code-block:: bash
+
+   cmake --preset doq-corosio
+   cmake --build --preset doq-corosio
+   ctest --preset doq-corosio
+
+* **OpenSSL, 3.5 or later.** anyhttp's Corosio build has Corosio's ``openssl_stream``, which uses an
+  API that AWS-LC does not have, and ngtcp2 needs the QUIC API of OpenSSL 3.5. The configure stops
+  where ``C_ARES_ASYNC_TLS`` is ``AWS-LC``.
+* **Capy and Corosio at anyhttp's pins.** This library declares them before anyhttp does, so
+  anyhttp is built on the ones :src:`CMakeLists.txt` pins -- which are the commits that anyhttp
+  pins itself, at the commit it is pinned at. Moving one pin means moving the others with it.
+* **An anyhttp of the program's own.** Where ``anyhttp::anyhttp`` is there already when this
+  library is configured, it is used as it is, with the Capy and Corosio it was built on. It has to
+  be built for the runtime of ``C_ARES_ASYNC_API``: the configure says so where ``ANYHTTP_API``
+  tells, and :src:`include/c_ares_async/detail/quic_transport.hpp` stops the compile where it does
+  not.
+* **Each coroutine of the bridge yields first.** ``launch()`` starts a coroutine from the
+  executor's queue on Asio, as ``co_spawn()`` does, and right away on Corosio, where the caller is
+  on the executor already. The connection is started from c-ares' ``aconnect()``, which is not
+  where it should run.
+* **c-ares' end of the socketpair is waited on as a** ``local_stream_socket``. Corosio's
+  ``tcp_socket`` does not take a Unix domain socket, so the COROSIO ``Descriptor`` goes by the
+  family of the socket as well as by its type.
+
+In the tests, anyhttp's server for DoQ runs on the resolver's ``corosio::io_context``, and the rest
+of the fake DNS server on Asio's, as for the other tests of a COROSIO build: both are stepped from
+the thread the test runs on.
+
 What anyhttp needed
 -------------------
 
@@ -88,8 +132,6 @@ after that and moved anyhttp's Capy and Corosio to the commits this library pins
 What is not there
 -----------------
 
-* **Corosio.** anyhttp's runtime is chosen when it is built, and needs OpenSSL 3.5 for Corosio.
-  DoQ is for ``C_ARES_ASYNC_API=ASIO`` only.
 * **Installing.** ``c_ares_async::doq`` is not installed, as anyhttp is built as part of this build
   and not installed with it.
 * **One program, one choice.** The resolver is the same object with and without

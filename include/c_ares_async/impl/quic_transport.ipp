@@ -5,23 +5,17 @@
 
 #include <c_ares_async/runtime.hpp>
 
-#if C_ARES_ASYNC_DOQ && C_ARES_ASYNC_ASIO // as detail/quic_transport.hpp: empty without
+#if C_ARES_ASYNC_DOQ // as detail/quic_transport.hpp: empty without
 
+#include <c_ares_async/detail/event_loop.hpp>
 #include <c_ares_async/detail/log.hpp>
 #include <c_ares_async/detail/quic_transport.hpp> // NOLINT(misc-header-include-cycle)
 #include <c_ares_async/detail/socket_functions.hpp>
 
 #include <anyhttp/quic.hpp>
+#include <anyhttp/runtime.hpp>
 
-#include <boost/asio/as_tuple.hpp>
-#include <boost/asio/bind_cancellation_slot.hpp>
-#include <boost/asio/buffer.hpp>
-#include <boost/asio/cancellation_signal.hpp>
-#include <boost/asio/co_spawn.hpp>
-#include <boost/asio/local/stream_protocol.hpp>
-#include <boost/asio/read.hpp>
-#include <boost/asio/use_awaitable.hpp>
-#include <boost/asio/write.hpp>
+#include <boost/asio/buffer.hpp> // what anyhttp takes for a buffer, on either runtime
 
 #include <net/if.h>
 #include <netinet/in.h>
@@ -32,10 +26,11 @@
 #include <cerrno>
 #include <cstring>
 #include <deque>
-#include <exception>
 #include <stdexcept>
 #include <string>
+#include <tuple>
 #include <utility>
+#include <variant>
 
 namespace c_ares_async::inline C_ARES_ASYNC_RUNTIME::detail
 {
@@ -57,16 +52,32 @@ inline constexpr std::size_t dns_max_message_size = 65535;
 // The coroutines take a shared_ptr to the bridge, which is what keeps it around -- c-ares closing
 // its socket only stops it. All of it runs on the resolver's executor, so it needs no lock.
 //
+// It is written once, for either runtime. What it does on the runtime is anyhttp's runtime layer
+// -- starting coroutines, reading and writing, waiting for one of two things -- as the bridge is
+// only ever compiled along with anyhttp, which has that layer for both. Its end of the socketpair
+// is the event loop's LocalSocket, see detail/event_loop.hpp.
+//
+// Every coroutine here yields before it does anything else. anyhttp::launch() starts one from the
+// executor's queue on Asio, as co_spawn() does, but right away on Corosio, where the caller is on
+// the executor already -- and what launches them here is in the middle of something: c-ares, in
+// aconnect(), or a loop over the queries waiting for a stream. This way, they start the same way
+// on both runtimes, after their caller is through.
+//
 class quic_transport::bridge : public std::enable_shared_from_this<bridge>
 {
 public:
-   bridge(const Executor& executor, ares_socket_t fd, int domain, int peer,
-          const tls_options& options, const log_function& logger)
+   bridge(const Executor& executor, ares_socket_t fd, int domain, const tls_options& options,
+          const log_function& logger)
       : m_executor(executor), m_fd(fd), m_domain(domain), m_socket(executor), m_options(options),
         m_logger(&logger)
    {
-      m_socket.assign(boost::asio::local::stream_protocol(), peer);
    }
+
+   //
+   // Takes 'peer', our end of the socketpair, which the bridge closes from then on. Where that
+   // fails, it is still the caller's.
+   //
+   error_code adopt(int peer) noexcept { return adopt_socket(m_socket, peer); }
 
    int domain() const noexcept { return m_domain; }
 
@@ -76,9 +87,7 @@ public:
    void start(const TcpEndpoint& server)
    {
       m_server = server;
-      m_connecting = true;
-      boost::asio::co_spawn(m_executor, run(shared_from_this()),
-                            boost::asio::bind_cancellation_slot(m_cancel.slot(), ignore_exception));
+      anyhttp::launch(m_executor, run(shared_from_this()));
    }
 
    //
@@ -96,9 +105,7 @@ public:
       m_stopped = true;
       m_logger = nullptr;
       m_waiting.clear();
-
-      if (m_connecting)
-         m_cancel.emit(boost::asio::cancellation_type::terminal);
+      m_stop.set(); // which ends the connection that is being made, if it still is
 
       //
       // Let go of the connection, rather than just close it. anyhttp keeps the handler of the
@@ -109,13 +116,10 @@ public:
       auto connection = std::move(m_connection);
       connection.close(static_cast<std::uint64_t>(doq_error::no_error));
 
-      boost::system::error_code ignored;
-      m_socket.close(ignored);
+      close_socket(m_socket);
    }
 
 private:
-   static void ignore_exception(const std::exception_ptr&) noexcept {}
-
    template <typename... Args>
    void log(log_level level, std::format_string<Args...> format, Args&&... args)
    {
@@ -130,12 +134,40 @@ private:
    }
 
    //
+   // Comes back once stop() has been called, or when it is cancelled. A task, for when_either()
+   // to take: what Event::wait() returns is one on Asio, and an awaitable of Capy's on Corosio.
+   //
+   Task<void> stopped() { std::ignore = co_await m_stop.wait(); }
+
+   //
+   // Exactly 'size' bytes off our end of the socketpair, or the error that came first.
+   //
+   Task<error_code> read(void* data, std::size_t size)
+   {
+      auto* at = static_cast<unsigned char*>(data);
+      while (size > 0)
+      {
+         auto [ec, n] =
+            co_await anyhttp::io::read_some(m_socket, boost::asio::mutable_buffer(at, size));
+         if (ec)
+            co_return ec;
+         if (n == 0)
+            co_return anyhttp::errors::eof;
+
+         at += n;
+         size -= n;
+      }
+      co_return error_code{};
+   }
+
+   //
    // The connection, and then the queries, as c-ares writes them to its end of the socketpair.
    //
    static Task<void> run(std::shared_ptr<bridge> self)
    {
-      using boost::asio::as_tuple;
-      using boost::asio::use_awaitable;
+      co_await anyhttp::yield_now(); // see the class
+      if (self->m_stopped)
+         co_return;
 
       anyhttp::quic::Config config{
          .alpn = "doq",
@@ -148,10 +180,17 @@ private:
       // To the address c-ares has for the server, which is all it has, with the certificate
       // checked against the name that came with the options -- or the chain only, without one.
       //
-      auto [ec, connection] = co_await anyhttp::quic::connect(
-         self->m_executor, {self->m_server}, self->m_options.hostname, std::move(config));
-      self->m_connecting = false;
+      // Unless the bridge is stopped first: when_either() cancels the connection that is being
+      // made then, and waits for it to be through.
+      //
+      auto connected = co_await anyhttp::when_either(
+         anyhttp::quic::connect(self->m_executor, {self->m_server}, self->m_options.hostname,
+                                std::move(config)),
+         self->stopped());
+      if (connected.index() != 0)
+         co_return;
 
+      auto [ec, connection] = std::get<0>(std::move(connected));
       if (self->m_stopped)
       {
          connection.close(static_cast<std::uint64_t>(doq_error::no_error));
@@ -173,14 +212,12 @@ private:
       self->log(log_level::info, "established with {}, verified for '{}'{}", self->server(),
                 self->m_options.hostname, self->m_options.verify ? "" : " NOT (verify is off)");
 
-      boost::asio::co_spawn(self->m_executor, watch(self), ignore_exception);
+      anyhttp::launch(self->m_executor, watch(self));
 
       for (;;)
       {
          std::array<unsigned char, doq_prefix_size> prefix{};
-         auto [read_ec, n] = co_await boost::asio::async_read(
-            self->m_socket, boost::asio::buffer(prefix), as_tuple(use_awaitable));
-         if (read_ec)
+         if (co_await self->read(prefix.data(), prefix.size()))
             break; // c-ares has closed its end, or we have closed ours
 
          const std::size_t size = (std::size_t{prefix[0]} << 8) | prefix[1];
@@ -192,10 +229,7 @@ private:
 
          std::string query(doq_prefix_size + size, '\0');
          std::memcpy(query.data(), prefix.data(), prefix.size());
-         auto [body_ec, m] = co_await boost::asio::async_read(
-            self->m_socket, boost::asio::buffer(query.data() + doq_prefix_size, size),
-            as_tuple(use_awaitable));
-         if (body_ec)
+         if (co_await self->read(query.data() + doq_prefix_size, size))
             break;
 
          self->start_exchange(std::move(query));
@@ -212,6 +246,10 @@ private:
    //
    static Task<void> watch(std::shared_ptr<bridge> self)
    {
+      co_await anyhttp::yield_now(); // see the class
+      if (self->m_stopped)
+         co_return;
+
       auto [ec, stream] = co_await self->m_connection.accept_stream();
       if (!ec)
       {
@@ -249,9 +287,8 @@ private:
          return;
       }
 
-      boost::asio::co_spawn(m_executor,
-                            exchange(shared_from_this(), std::move(stream), std::move(query)),
-                            ignore_exception);
+      anyhttp::launch(m_executor,
+                      exchange(shared_from_this(), std::move(stream), std::move(query)));
    }
 
    //
@@ -279,6 +316,7 @@ private:
    static Task<void> exchange(std::shared_ptr<bridge> self, anyhttp::quic::Stream stream,
                               std::string query)
    {
+      co_await anyhttp::yield_now(); // see the class
       co_await self->ask(stream, std::move(query));
       stream.reset();
       self->start_waiting();
@@ -370,17 +408,17 @@ private:
       if (!m_writing)
       {
          m_writing = true;
-         boost::asio::co_spawn(m_executor, write_answers(shared_from_this()), ignore_exception);
+         anyhttp::launch(m_executor, write_answers(shared_from_this()));
       }
    }
 
    static Task<void> write_answers(std::shared_ptr<bridge> self)
    {
+      co_await anyhttp::yield_now(); // see the class
       while (!self->m_answers.empty() && !self->m_stopped)
       {
-         auto [ec, n] = co_await boost::asio::async_write(
-            self->m_socket, boost::asio::buffer(self->m_answers.front()),
-            boost::asio::as_tuple(boost::asio::use_awaitable));
+         auto [ec, n] = co_await anyhttp::io::write(self->m_socket,
+                                                    boost::asio::buffer(self->m_answers.front()));
          if (ec)
          {
             self->stop();
@@ -395,15 +433,14 @@ private:
    Executor m_executor;
    ares_socket_t m_fd; // c-ares' end, which is what the log messages go by
    int m_domain;
-   boost::asio::local::stream_protocol::socket m_socket; // our end
+   LocalSocket m_socket; // our end
    tls_options m_options;
    const log_function* m_logger; // null once stopped
    TcpEndpoint m_server;
    anyhttp::quic::Connection m_connection;
-   boost::asio::cancellation_signal m_cancel; // for the connection that is being made
+   anyhttp::Event m_stop; // set by stop(), for the connection that is being made
    std::deque<std::string> m_waiting; // queries waiting for a stream
    std::deque<std::string> m_answers; // answers waiting for c-ares
-   bool m_connecting = false;
    bool m_writing = false;
    bool m_stopped = false;
 };
@@ -452,19 +489,36 @@ inline ares_socket_t quic_transport::on_socket(int domain, int type, int protoco
       return ARES_SOCKET_BAD;
 
    //
-   // Nothing is to be thrown back into c-ares, which is C. Once there is a bridge, our end is its
-   // socket's to close, and only before that ours.
+   // Nothing is to be thrown back into c-ares, which is C. Once the bridge has adopted our end,
+   // that is its socket's to close, and only before that ours.
    //
    std::shared_ptr<bridge> created;
    try
    {
-      created = std::make_shared<bridge>(m_executor, fds[0], domain, fds[1], m_options, m_logger);
+      created = std::make_shared<bridge>(m_executor, fds[0], domain, m_options, m_logger);
+   }
+   catch (...)
+   {
+      ::close(fds[1]);
+      ::close(fds[0]);
+      errno = ENOMEM;
+      return ARES_SOCKET_BAD;
+   }
+
+   if (const auto ec = created->adopt(fds[1]))
+   {
+      ::close(fds[1]);
+      ::close(fds[0]);
+      errno = ec.value(); // the system's, as both runtimes report it
+      return ARES_SOCKET_BAD;
+   }
+
+   try
+   {
       m_bridges.emplace(fds[0], created);
    }
    catch (...)
    {
-      if (!created)
-         ::close(fds[1]);
       ::close(fds[0]);
       errno = ENOMEM;
       return ARES_SOCKET_BAD;
@@ -496,16 +550,14 @@ inline int quic_transport::on_connect(ares_socket_t fd, const struct sockaddr* a
    if (it == m_bridges.end())
       return ::connect(fd, address, length);
 
-   TcpEndpoint server;
-   if (length > server.capacity())
+   const auto server = make_endpoint(address, length);
+   if (!server)
    {
       errno = EINVAL;
       return -1;
    }
 
-   std::memcpy(server.data(), address, length);
-   server.resize(length);
-   it->second->start(server);
+   it->second->start(*server);
    return 0;
 }
 
@@ -612,4 +664,4 @@ inline const struct ares_socket_functions_ex& quic_transport::functions()
 
 } // namespace c_ares_async::inline C_ARES_ASYNC_RUNTIME::detail
 
-#endif // C_ARES_ASYNC_DOQ && C_ARES_ASYNC_ASIO
+#endif // C_ARES_ASYNC_DOQ
