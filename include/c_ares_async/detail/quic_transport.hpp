@@ -8,17 +8,22 @@
 //
 // c-ares has DNS over TCP, which is length-prefixed messages on a byte stream, and DoQ is the same
 // messages with the same prefix, one on each QUIC stream of its own (RFC 9250, section 4.2). So
-// c-ares does DNS over TCP, as it does for DNS over TLS -- but the socket that its asocket() gives
-// it is one end of a socketpair(). The other end is ours: a bridge reads the queries off it, sends
-// each one on a stream of its own, and writes the answers back, so c-ares sees a TCP connection
-// that answers. What it waits for and when it gives up are what they are for TCP, and the
-// readiness of its socket is a socket's.
+// c-ares does DNS over TCP, as it does for DNS over TLS, and the socket functions are where the
+// transport goes in, as they are for TLS: what c-ares sends on a socket of ours is cut into its
+// messages, and each goes out on a stream of its own; what comes back is what it receives.
 //
-//    c-ares  --[len][query]-->  socketpair  --> bridge --> QUIC stream, ID 0, FIN --> server
-//    c-ares  <--[len][answer]-- socketpair  <-- bridge <-- QUIC stream, ID put back <-- server
+//    c-ares  --[len][query]-->  asendto()   --> bridge --> QUIC stream, ID 0, FIN --> server
+//    c-ares  <--[len][answer]-- arecvfrom() <-- bridge <-- QUIC stream, ID put back <-- server
 //
-// A QUIC connection that cannot be made, or goes away, is the end of the socketpair as well:
-// c-ares reads the end of its stream, and fails the server the way it does for TCP.
+// Where TLS has a socket of the system's under it, QUIC has a UDP socket, its retransmissions and
+// its timers, which are anyhttp's, and nothing whose readiness would mean that an answer is there.
+// So a socket of ours is no socket at all -- the descriptor c-ares gets is only there to reserve
+// its number -- and it says itself when it can be read: the resolver waits on a descriptor of
+// ours for it, in place of one of the event loop's. What c-ares waits for and when it gives up
+// are what they are for TCP.
+//
+// A QUIC connection that cannot be made, or goes away, is the end of the stream to c-ares, which
+// fails the server the way it does for TCP.
 //
 // https://www.rfc-editor.org/rfc/rfc9250
 // https://c-ares.org/docs/ares_set_socket_functions_ex.html
@@ -29,6 +34,7 @@
 
 #if C_ARES_ASYNC_DOQ
 
+#include <c_ares_async/detail/event_loop.hpp>
 #include <c_ares_async/logging.hpp>
 #include <c_ares_async/tls_options.hpp>
 
@@ -41,8 +47,10 @@
 #include <ares.h>
 
 #include <cstdint>
+#include <functional>
 #include <map>
 #include <memory>
+#include <optional>
 
 namespace c_ares_async::inline C_ARES_ASYNC_RUNTIME::detail
 {
@@ -62,7 +70,11 @@ enum class doq_error : std::uint64_t
 
 class quic_transport
 {
+   class bridge;
+
 public:
+   class descriptor;
+
    //
    // 'logger' is the resolver's, and looked at afresh for every message. What runs on after the
    // resolver is gone -- a connection that is still being made, a stream that is still open --
@@ -79,16 +91,27 @@ public:
    //
    void install(ares_channel_t* channel);
 
-private:
-   class bridge;
+   //
+   // What the resolver waits on for 'fd' if it is a socket of ours, or nothing for one of the
+   // system's, which the event loop waits on as ever.
+   //
+   std::optional<descriptor> find_descriptor(ares_socket_t fd) const;
 
+private:
    //
    // The socket functions themselves. c-ares calls the static thunks, which forward here.
    //
    ares_socket_t on_socket(int domain, int type, int protocol);
    int on_close(ares_socket_t fd);
+   int on_setsockopt(ares_socket_t fd, ares_socket_opt_t opt, const void* value,
+                     ares_socklen_t size);
    int on_connect(ares_socket_t fd, const struct sockaddr* address, ares_socklen_t length);
+   ares_ssize_t on_recv(ares_socket_t fd, void* buffer, size_t length);
+   ares_ssize_t on_send(ares_socket_t fd, const void* buffer, size_t length, int flags);
    int on_getsockname(ares_socket_t fd, struct sockaddr* address, ares_socklen_t* length);
+   int on_bind(ares_socket_t fd, const struct sockaddr* address, ares_socklen_t length);
+
+   bridge* find(ares_socket_t fd) const;
 
    static const struct ares_socket_functions_ex& functions();
 
@@ -96,6 +119,41 @@ private:
    tls_options m_options;
    const log_function& m_logger;
    std::map<ares_socket_t, std::shared_ptr<bridge>> m_bridges;
+};
+
+//
+// A socket of ours, as the resolver waits on it: the three calls of the event loop's Descriptor,
+// for a socket that says itself when it is ready. It can be read once there is an answer, or once
+// the QUIC connection is over, which c-ares reads as the end of its stream. It can always be
+// written, as what c-ares sends is taken as a whole.
+//
+// A wait that is ready completes from the executor's queue, never from inside the call, as c-ares
+// arms its sockets from inside its own functions and does not survive being called back there.
+//
+class quic_transport::descriptor
+{
+public:
+   explicit descriptor(std::shared_ptr<bridge> bridge) noexcept;
+   ~descriptor() { detach(); }
+
+   descriptor(descriptor&&) noexcept = default;
+   descriptor& operator=(descriptor&&) = delete;
+
+   bool is_open() const noexcept { return m_bridge != nullptr; }
+
+   //
+   // Cancels the wait that is pending, whose callback still runs, with errors::canceled.
+   //
+   void detach();
+
+   //
+   // Calls 'on_ready(error_code)' once, when the socket is ready for 'type', or with
+   // errors::canceled where it is detached first.
+   //
+   void wait(wait_type type, std::function<void(const error_code&)> on_ready);
+
+private:
+   std::shared_ptr<bridge> m_bridge;
 };
 
 } // namespace c_ares_async::inline C_ARES_ASYNC_RUNTIME::detail

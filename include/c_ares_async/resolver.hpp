@@ -216,6 +216,33 @@ public:
     */
    error_code set_servers(std::string_view servers);
 
+   /** Sends the queries from `address`.
+
+       There is an address to send from for each family, as there is in
+       c-ares, which takes them with `ares_set_local_ip4()` and
+       `ares_set_local_ip6()`: this sets the one of the family of `address`,
+       and the servers of that family are asked from there. Those of the
+       other family are not affected. The unspecified address, "0.0.0.0" or
+       "::", has the system choose again, by its routes, which is how a
+       resolver starts out.
+
+       It is the same over every transport. A socket of c-ares' is bound to
+       the address before it connects, and for DNS over QUIC the UDP socket
+       of the connection is.
+
+       It holds for the sockets that are made from here on. A connection
+       that TCP, TLS or QUIC have up already goes on sending from where it
+       did, so this is for before the first lookup, as @ref set_servers is.
+
+       @par Errors
+       There are none here. A socket cannot be bound to an address that is
+       not one of the host's, and the lookups fail then, with
+       `ARES_ECONNREFUSED`, as for a server that cannot be reached.
+
+       @param address The address, of either family.
+    */
+   void set_local_address(const IpAddress& address);
+
    /** Has `logger` called with every message from here on.
 
        The messages come from inside the operations of the resolver, so

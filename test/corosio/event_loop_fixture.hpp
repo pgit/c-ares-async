@@ -119,13 +119,18 @@ protected:
       return true;
    }
 
-   static c_ares_async::TcpEndpoint endpoint(std::string_view address, unsigned short port)
+   static c_ares_async::IpAddress ip_address(std::string_view address)
    {
       auto [ec, parsed] = boost::corosio::make_ip_address(address);
       if (ec)
          throw std::system_error(ec, "make_ip_address");
 
-      return {parsed, port};
+      return parsed;
+   }
+
+   static c_ares_async::TcpEndpoint endpoint(std::string_view address, unsigned short port)
+   {
+      return {ip_address(address), port};
    }
 
    //

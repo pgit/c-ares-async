@@ -185,6 +185,22 @@ A resolver starts out with the servers of the system, from ``/etc/resolv.conf``.
 They have to be addresses. A server that only has a name needs that name looked up first, by another
 resolver.
 
+Where to send from
+------------------
+
+The queries go out from whichever address the system's routes pick for the server. On a host with
+more than one, :cpp:func:`resolver::set_local_address` chooses, for the servers of its family:
+
+.. literalinclude:: snippets.cpp
+   :language: cpp
+   :start-after: // [local-address]
+   :end-before: // [local-address-end]
+
+It is the same over UDP, TCP, DNS over TLS and DNS over QUIC. It holds for the connections made
+after it, so it goes with :cpp:func:`resolver::set_servers`, before the first lookup. An address
+that is not one of the host's is no error until there is something to send: then the lookups fail
+with ``ARES_ECONNREFUSED``, as for a server that cannot be reached.
+
 DNS over TLS
 ------------
 
@@ -303,8 +319,9 @@ resolver a strand, and use the resolver from inside that strand only:
 * **Cancel them from there.** A cancellation calls into the resolver on the thread that sends it:
   the one that emits the cancellation signal on Asio, the one that requests the stop on Corosio.
   So it has to come from a timer or a coroutine on the same strand, not from another thread.
-* **Configure the resolver there**, with :cpp:func:`resolver::set_servers` and
-  :cpp:func:`resolver::set_logger`. The logger is called from inside the strand.
+* **Configure the resolver there**, with :cpp:func:`resolver::set_servers`,
+  :cpp:func:`resolver::set_local_address` and :cpp:func:`resolver::set_logger`. The logger is called
+  from inside the strand.
 * **Destroy it there**, or once the threads are through. Making it before the threads start is
   fine as well.
 

@@ -34,8 +34,8 @@ see the socket once there is a session on it. A handshake that fails leaves the 
 and the next ``SSL_read()`` reports ``ECONNRESET`` so that c-ares fails the server the usual way.
 
 DoH would need HTTP/2 framing and a request/response translation on top, which is a much worse fit
-for a byte-stream hook -- it is not done here. DNS over QUIC is, with a socketpair where the TCP
-connection would be, see :doc:`dns-over-quic`.
+for a byte-stream hook -- it is not done here. DNS over QUIC is, in the same socket functions, with
+a bridge that says itself when a socket can be read, see :doc:`dns-over-quic`.
 
 Whose certificate
 -----------------

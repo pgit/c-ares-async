@@ -15,8 +15,11 @@
 
 using c_ares_async::error_code;
 using c_ares_async::make_ares_error;
+using testing::Each;
 using testing::ElementsAre;
+using testing::Field;
 using testing::IsEmpty;
+using testing::Not;
 using testing::UnorderedElementsAre;
 
 using Resolver = resolver_fixture;
@@ -259,6 +262,87 @@ TEST_F(Resolver, AsksTheServerItWasToldLast)
    const auto [ec, endpoints] = resolve("www.example.test");
    EXPECT_FALSE(ec) << ec.message();
    EXPECT_THAT(endpoints, ElementsAre(endpoint("192.0.2.2", 443)));
+   EXPECT_THAT(server.queries(), IsEmpty());
+}
+
+// --------------------------------------------------------------------------------------------------
+//
+// The whole of 127.0.0.0/8 is the loopback interface's, so there is an address to send from that
+// is not 127.0.0.1, which is where the system sends from to a server at 127.0.0.1.
+//
+
+TEST_F(Resolver, SendsFromTheLocalAddress)
+{
+   server.add_address("www.example.test", "192.0.2.1");
+   resolver.set_local_address(ip_address("127.0.0.3"));
+
+   const auto [ec, endpoints] = resolve("www.example.test");
+
+   EXPECT_FALSE(ec) << ec.message();
+   EXPECT_THAT(endpoints, ElementsAre(endpoint("192.0.2.1", 443)));
+   EXPECT_THAT(server.queries(), Not(IsEmpty()));
+   EXPECT_THAT(server.queries(), Each(Field(&fake_dns_server::query::from, "127.0.0.3")));
+}
+
+TEST_F(Resolver, SendsFromTheLocalAddressOverTcpAsWell)
+{
+   server.add_address("www.example.test", "192.0.2.1");
+   server.set_truncate_udp(true);
+   resolver.set_local_address(ip_address("127.0.0.3"));
+
+   const auto [ec, endpoints] = resolve("www.example.test");
+
+   EXPECT_FALSE(ec) << ec.message();
+   EXPECT_GE(server.count(fake_dns_server::transport::tcp), 1u);
+   EXPECT_THAT(server.queries(), Each(Field(&fake_dns_server::query::from, "127.0.0.3")));
+}
+
+//
+// An address the host does not have, which would fail every query if it were used: it is not,
+// as it is of the other family than the server.
+//
+TEST_F(Resolver, KeepsTheLocalAddressToItsFamily)
+{
+   server.add_address("www.example.test", "192.0.2.1");
+   resolver.set_local_address(ip_address("2001:db8::1"));
+
+   const auto [ec, endpoints] = resolve("www.example.test");
+
+   EXPECT_FALSE(ec) << ec.message();
+   EXPECT_THAT(server.queries(), Not(IsEmpty()));
+   EXPECT_THAT(server.queries(), Each(Field(&fake_dns_server::query::from, "127.0.0.1")));
+}
+
+//
+// Another name the second time, which c-ares does not have in its cache.
+//
+TEST_F(Resolver, SendsFromWhereTheSystemSaysOnceTheAddressIsUnspecified)
+{
+   server.add_address("www.example.test", "192.0.2.1");
+   server.add_address("mail.example.test", "192.0.2.2");
+   resolver.set_local_address(ip_address("127.0.0.3"));
+   resolve("www.example.test");
+   ASSERT_THAT(server.queries(), Not(IsEmpty()));
+   const auto before = server.queries().size();
+
+   resolver.set_local_address(ip_address("0.0.0.0"));
+   const auto [ec, endpoints] = resolve("mail.example.test");
+
+   EXPECT_FALSE(ec) << ec.message();
+   ASSERT_GT(server.queries().size(), before);
+   for (auto i = before; i < server.queries().size(); ++i)
+      EXPECT_EQ(server.queries()[i].from, "127.0.0.1") << i;
+}
+
+TEST_F(Resolver, FailsWhereTheLocalAddressIsNotOneOfTheHosts)
+{
+   server.add_address("www.example.test", "192.0.2.1");
+   resolver.set_local_address(ip_address("192.0.2.9"));
+
+   const auto [ec, endpoints] = resolve("www.example.test");
+
+   EXPECT_EQ(ec, make_ares_error(ARES_ECONNREFUSED)) << ec.message();
+   EXPECT_THAT(endpoints, IsEmpty());
    EXPECT_THAT(server.queries(), IsEmpty());
 }
 

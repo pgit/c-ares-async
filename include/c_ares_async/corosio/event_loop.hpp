@@ -15,7 +15,6 @@
 #include <boost/corosio/ip_address.hpp>
 #include <boost/corosio/ipv4_address.hpp>
 #include <boost/corosio/ipv6_address.hpp>
-#include <boost/corosio/local_stream_socket.hpp>
 #include <boost/corosio/tcp_socket.hpp>
 #include <boost/corosio/udp_socket.hpp>
 #include <boost/corosio/wait_type.hpp>
@@ -48,10 +47,8 @@ enum class wait_type
 //
 // Corosio has no descriptor type that would take any file descriptor: readiness comes from the
 // sockets, which is where assign() adopts one that was made elsewhere -- and the socket has to be
-// of the right kind, so which one it is comes from SO_TYPE, and from the family of its address.
-// That is a Unix domain socket for DNS over QUIC, whose socket for c-ares is one end of a
-// socketpair(), see quic_transport.hpp. Either way nothing but wait() is ever called on it, and
-// release() hands the descriptor back to c-ares' ownership.
+// of the right kind, so which one it is comes from SO_TYPE. Either way nothing but wait() is ever
+// called on it, and release() hands the descriptor back to c-ares' ownership.
 //
 class Descriptor
 {
@@ -63,20 +60,11 @@ public:
       if (::getsockopt(fd, SOL_SOCKET, SO_TYPE, &type, &length) != 0)
          throw system_error(last_error(), "getsockopt(SO_TYPE)");
 
-      sockaddr_storage address{};
-      socklen_t address_length = sizeof(address);
-      if (::getsockname(fd, reinterpret_cast<sockaddr*>(&address), &address_length) != 0)
-         throw system_error(last_error(), "getsockname");
-
       auto impl = std::make_shared<state>();
-      auto& context = executor.context();
-      error_code ec;
-      if (address.ss_family == AF_UNIX && type == SOCK_STREAM)
-         ec = impl->socket.emplace<boost::corosio::local_stream_socket>(context).assign(fd);
-      else if (type == SOCK_STREAM)
-         ec = impl->socket.emplace<boost::corosio::tcp_socket>(context).assign(fd);
-      else
-         ec = impl->socket.emplace<boost::corosio::udp_socket>(context).assign(fd);
+      const auto ec =
+         type == SOCK_STREAM
+            ? impl->socket.emplace<boost::corosio::tcp_socket>(executor.context()).assign(fd)
+            : impl->socket.emplace<boost::corosio::udp_socket>(executor.context()).assign(fd);
       if (ec)
          throw system_error(ec, "assign");
 
@@ -139,8 +127,8 @@ private:
    struct state
    {
       //
-      // The socket types have awaitables of their own, so this is a coroutine picking one of them
-      // rather than a visit, which would have to come back with a common type.
+      // The two socket types have awaitables of their own, so this is a coroutine picking one of
+      // them rather than a visit, which would have to come back with a common type.
       //
       Task<error_code> wait(wait_type type)
       {
@@ -152,8 +140,6 @@ private:
             std::tie(ec) = co_await tcp->wait(what);
          else if (auto* udp = std::get_if<boost::corosio::udp_socket>(&socket))
             std::tie(ec) = co_await udp->wait(what);
-         else if (auto* local = std::get_if<boost::corosio::local_stream_socket>(&socket))
-            std::tie(ec) = co_await local->wait(what);
          else
             co_return errors::canceled; // released underneath us
 
@@ -170,26 +156,13 @@ private:
          co_return ec;
       }
 
-      std::variant<std::monostate, boost::corosio::tcp_socket, boost::corosio::udp_socket,
-                   boost::corosio::local_stream_socket>
-         socket;
+      std::variant<std::monostate, boost::corosio::tcp_socket, boost::corosio::udp_socket> socket;
       std::stop_source stop;
    };
 
    Executor executor_;
    std::shared_ptr<state> impl_;
 };
-
-//
-// Our end of a socketpair() that c-ares has the other end of. assign() hands back what it does not
-// take, and close() throws nothing, so these are only here to be spelled the same on either
-// runtime.
-//
-using LocalSocket = boost::corosio::local_stream_socket;
-
-inline error_code adopt_socket(LocalSocket& socket, int fd) noexcept { return socket.assign(fd); }
-
-inline void close_socket(LocalSocket& socket) noexcept { socket.close(); }
 
 inline std::string address_text(const std::array<unsigned char, 4>& bytes)
 {
