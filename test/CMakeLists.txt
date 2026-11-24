@@ -133,6 +133,10 @@ gtest_discover_tests(c_ares_async_tests DISCOVERY_TIMEOUT 60 PROPERTIES TIMEOUT 
 # runtime only are left out. A pool of four keeps the compilers that run at the same time to what
 # the memory takes, while the other tests run as well.
 #
+# On Corosio, none of them may bring Asio along, with or without DNS over QUIC: a program that
+# names nothing of Asio is to compile nothing of it. It is the check that anyhttp has for its own
+# public headers on Corosio, which are all that c_ares_async::doq may include of anyhttp's.
+#
 get_target_property(c_ares_async_header_set c_ares_async_headers HEADER_SET)
 set(c_ares_async_header_sources)
 foreach (header IN LISTS c_ares_async_header_set)
@@ -142,9 +146,15 @@ foreach (header IN LISTS c_ares_async_header_set)
         continue()
     endif()
 
+    set(content "#include <${include}>\n")
+    if (c_ares_async_runtime STREQUAL "corosio")
+        string(APPEND content "\n#if defined(BOOST_ASIO_VERSION)\n"
+                              "#error \"<${include}> brings Asio along on Corosio\"\n#endif\n")
+    endif()
+
     string(MAKE_C_IDENTIFIER "${include}" name)
     set(source "${CMAKE_CURRENT_BINARY_DIR}/headers/${name}.cpp")
-    file(CONFIGURE OUTPUT "${source}" CONTENT "#include <${include}>\n")
+    file(CONFIGURE OUTPUT "${source}" CONTENT "${content}")
     list(APPEND c_ares_async_header_sources "${source}")
 endforeach()
 
