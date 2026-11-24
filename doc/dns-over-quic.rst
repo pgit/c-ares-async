@@ -126,8 +126,9 @@ check be turned off. `anyhttp#50 <https://github.com/pgit/anyhttp/pull/50>`__ ad
   certificate checked for ``host`` -- or the chain alone, and no SNI, for an empty one;
 * ``quic::Config::tls_verify``.
 
-The pin is at the merge of `anyhttp#51 <https://github.com/pgit/anyhttp/pull/51>`__, which came
-after that and moved anyhttp's Capy and Corosio to the commits this library pins.
+The pin is at the merge of `anyhttp#55 <https://github.com/pgit/anyhttp/pull/55>`__, which came
+after `anyhttp#51 <https://github.com/pgit/anyhttp/pull/51>`__: that one moved anyhttp's Capy and
+Corosio to the commits this library pins.
 
 What is not there
 -----------------

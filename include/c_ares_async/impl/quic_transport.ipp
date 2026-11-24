@@ -12,10 +12,11 @@
 #include <c_ares_async/detail/quic_transport.hpp> // NOLINT(misc-header-include-cycle)
 #include <c_ares_async/detail/socket_functions.hpp>
 
+#include <anyhttp/net.hpp> // io::read_some() and io::write(), which take Asio's buffers
 #include <anyhttp/quic.hpp>
 #include <anyhttp/runtime.hpp>
 
-#include <boost/asio/buffer.hpp> // what anyhttp takes for a buffer, on either runtime
+#include <boost/asio/buffer.hpp>
 
 #include <net/if.h>
 #include <netinet/in.h>
@@ -272,7 +273,7 @@ private:
       if (m_stopped)
          return;
 
-      auto [ec, stream] = m_connection.open_stream();
+      auto [ec, stream] = m_connection.try_open_stream();
       if (ec == anyhttp::errors::would_block)
       {
          log(log_level::debug, "waiting for a stream, {} waiting already", m_waiting.size());
@@ -332,7 +333,7 @@ private:
       const std::array<char, 2> id{query[doq_prefix_size], query[doq_prefix_size + 1]};
       query[doq_prefix_size] = query[doq_prefix_size + 1] = 0;
 
-      auto [write_ec, written] = co_await stream.write_eof(boost::asio::buffer(query));
+      auto [write_ec, written] = co_await stream.write_eof(anyhttp::make_buffer(query));
       if (write_ec)
       {
          log(log_level::debug, "stream {}: sending the query failed: {}", stream.id(),
@@ -344,7 +345,7 @@ private:
       std::array<char, 4096> buffer{};
       for (;;)
       {
-         auto [read_ec, n] = co_await stream.read_some(boost::asio::buffer(buffer));
+         auto [read_ec, n] = co_await stream.read_some(anyhttp::make_buffer(buffer));
          answer.append(buffer.data(), n);
 
          if (answer.size() > doq_prefix_size + dns_max_message_size)

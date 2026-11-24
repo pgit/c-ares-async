@@ -527,7 +527,7 @@ anyhttp::Task<void> fake_dns_server::state::serve_quic_stream(std::shared_ptr<st
    std::array<unsigned char, 4096> buffer;
    for (;;)
    {
-      auto [ec, n] = co_await stream.read_some(boost::asio::buffer(buffer));
+      auto [ec, n] = co_await stream.read_some(anyhttp::make_buffer(buffer));
       query.insert(query.end(), buffer.begin(), buffer.begin() + n);
       if (ec == anyhttp::errors::eof)
          break;
@@ -553,7 +553,7 @@ anyhttp::Task<void> fake_dns_server::state::serve_quic_stream(std::shared_ptr<st
       framed.insert(framed.end(), copy.begin(), copy.end());
    }
 
-   std::ignore = co_await stream.write_eof(boost::asio::buffer(framed));
+   std::ignore = co_await stream.write_eof(anyhttp::make_buffer(framed));
 }
 
 #endif // C_ARES_ASYNC_DOQ
