@@ -109,6 +109,8 @@ elseif (C_ARES_ASYNC_API STREQUAL "COROSIO")
     # are not installed along with the headers -- a consumer of the installed package that uses
     # Corosio brings its own.
     #
+    # The pins are anyhttp's, at the commit anyhttp is pinned at below, so that they move together.
+    #
     if (NOT TARGET Boost::corosio OR NOT TARGET Boost::capy)
         include(FetchContent)
         foreach (option TESTS EXAMPLES BENCH)
@@ -118,12 +120,12 @@ elseif (C_ARES_ASYNC_API STREQUAL "COROSIO")
         FetchContent_Declare(
             capy
             GIT_REPOSITORY https://github.com/cppalliance/capy.git
-            GIT_TAG bdadc6adef8c8eb79da6454373175bb1428be524
+            GIT_TAG 07ecb34749d2f9cbf8456b370d6aca69ab6b39b7
             EXCLUDE_FROM_ALL)
         FetchContent_Declare(
             corosio
             GIT_REPOSITORY https://github.com/cppalliance/corosio.git
-            GIT_TAG fd8e95a7125047d5385068a4c640da8232b9588e
+            GIT_TAG 2d246de82c62a62d0da9c1e4c81a1865be7f9321
             EXCLUDE_FROM_ALL)
         FetchContent_MakeAvailable(capy corosio)
 
@@ -163,11 +165,12 @@ endif()
 
 #
 # anyhttp, for its QUIC. Pinned, as Capy and Corosio are: at the merge of
-# https://github.com/pgit/anyhttp/pull/50, which is what DNS over QUIC needs of quic::connect() --
-# connecting to an address while verifying the certificate for a name given apart from it, and not
-# verifying at all. It fetches Capy and Boost.HTTP in turn, which its HTTP/1.1 is built on, at pins
-# of its own. As a subproject it is the library and nothing else -- no tests, no programs, no
-# install rules.
+# https://github.com/pgit/anyhttp/pull/51, which moved its Capy and Corosio to the pins above.
+# https://github.com/pgit/anyhttp/pull/50 before that is what DNS over QUIC needs of
+# quic::connect() -- connecting to an address while verifying the certificate for a name given
+# apart from it, and not verifying at all. It fetches Capy and Boost.HTTP in turn, which its
+# HTTP/1.1 is built on, at pins of its own. As a subproject it is the library and nothing else --
+# no tests, no programs, no install rules.
 #
 if (C_ARES_ASYNC_DOQ)
     if (NOT C_ARES_ASYNC_API STREQUAL "ASIO")
@@ -185,7 +188,7 @@ if (C_ARES_ASYNC_DOQ)
         FetchContent_Declare(
             anyhttp
             GIT_REPOSITORY https://github.com/pgit/anyhttp.git
-            GIT_TAG 3d4c47aae9c695afa5939ac3398646375d69ec4b
+            GIT_TAG 9b308b6028e9dfc22a749f19ff88a9ee530ffac2
             EXCLUDE_FROM_ALL)
         FetchContent_MakeAvailable(anyhttp)
     endif()

@@ -76,19 +76,20 @@ What anyhttp needed
 anyhttp's ``quic::connect()`` used to resolve the host it was given and check the certificate
 against that same host, which is the wrong way round for a resolver: c-ares has the server's
 address and nothing else, and the name comes from :cpp:member:`tls_options::hostname`. Nor could the
-check be turned off. `anyhttp#50 <https://github.com/pgit/anyhttp/pull/50>`__ added both, and the
-pin is at its merge:
+check be turned off. `anyhttp#50 <https://github.com/pgit/anyhttp/pull/50>`__ added both:
 
 * ``quic::connect(executor, endpoints, host, config)``, to the endpoints given, with the
   certificate checked for ``host`` -- or the chain alone, and no SNI, for an empty one;
 * ``quic::Config::tls_verify``.
 
+The pin is at the merge of `anyhttp#51 <https://github.com/pgit/anyhttp/pull/51>`__, which came
+after that and moved anyhttp's Capy and Corosio to the commits this library pins.
+
 What is not there
 -----------------
 
-* **Corosio.** anyhttp's runtime is chosen when it is built, and anyhttp pins Capy, and for
-  Corosio Corosio as well, at other commits than this library does, and needs OpenSSL 3.5 there. DoQ is for
-  ``C_ARES_ASYNC_API=ASIO`` only.
+* **Corosio.** anyhttp's runtime is chosen when it is built, and needs OpenSSL 3.5 for Corosio.
+  DoQ is for ``C_ARES_ASYNC_API=ASIO`` only.
 * **Installing.** ``c_ares_async::doq`` is not installed, as anyhttp is built as part of this build
   and not installed with it.
 * **One program, one choice.** The resolver is the same object with and without
