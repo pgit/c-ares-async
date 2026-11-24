@@ -24,9 +24,12 @@ using c_ares_async::log_level;
 using c_ares_async::make_ares_error;
 using c_ares_async::tls_options;
 using testing::Contains;
+using testing::Each;
 using testing::ElementsAre;
+using testing::Field;
 using testing::HasSubstr;
 using testing::IsEmpty;
+using testing::Not;
 using testing::Pair;
 
 using transport = fake_dns_server::transport;
@@ -285,6 +288,34 @@ TEST_F(DnsOverTls, ReportsAServerThatIsNotThere)
 
    EXPECT_TRUE(ec);
    EXPECT_THAT(endpoints, IsEmpty());
+}
+
+//
+// The socket under the TLS session is c-ares' own, which binds it as it does for plain TCP.
+//
+TEST_F(DnsOverTls, SendsFromTheLocalAddress)
+{
+   make_resolver({.enabled = true, .hostname = {}, .verify = false});
+   resolver->set_local_address(ip_address("127.0.0.3"));
+
+   const auto [ec, endpoints] = resolve("www.example.test");
+
+   EXPECT_FALSE(ec) << ec.message();
+   EXPECT_EQ(server.handshakes(), 1u);
+   EXPECT_THAT(server.queries(), Not(IsEmpty()));
+   EXPECT_THAT(server.queries(), Each(Field(&fake_dns_server::query::from, "127.0.0.3")));
+}
+
+TEST_F(DnsOverTls, FailsWhereTheLocalAddressIsNotOneOfTheHosts)
+{
+   make_resolver({.enabled = true, .hostname = {}, .verify = false});
+   resolver->set_local_address(ip_address("192.0.2.9"));
+
+   const auto [ec, endpoints] = resolve("www.example.test");
+
+   EXPECT_EQ(ec, make_ares_error(ARES_ECONNREFUSED)) << ec.message();
+   EXPECT_THAT(endpoints, IsEmpty());
+   EXPECT_EQ(server.connections(), 0u);
 }
 
 #if !C_ARES_ASYNC_DOQ

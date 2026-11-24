@@ -12,6 +12,7 @@
 #include <c_ares_async/detail/quic_transport.hpp> // NOLINT(misc-header-include-cycle)
 #include <c_ares_async/detail/socket_functions.hpp>
 
+#include <anyhttp/net.hpp>
 #include <anyhttp/quic.hpp>
 #include <anyhttp/runtime.hpp>
 
@@ -25,6 +26,7 @@
 #include <array>
 #include <cerrno>
 #include <cstring>
+#include <optional>
 #include <stdexcept>
 #include <string>
 #include <tuple>
@@ -73,6 +75,24 @@ public:
    }
 
    int domain() const noexcept { return m_domain; }
+
+   //
+   // Where the connection is to send from, which is what c-ares binds its socket to before it
+   // connects, where the channel has a local address of the socket's family. It is the UDP socket
+   // of the connection that is bound, once there is one: an address that is not this host's
+   // fails the connection, not this.
+   //
+   int bind(const struct sockaddr* address, ares_socklen_t length) noexcept
+   {
+      m_local = anyhttp::io::from_sockaddr(address, length);
+      if (!m_local)
+      {
+         errno = EAFNOSUPPORT;
+         return -1;
+      }
+
+      return 0;
+   }
 
    //
    // Connects to 'server', and passes the queries on once there is a connection.
@@ -262,6 +282,7 @@ private:
          .reset_error_code = static_cast<std::uint64_t>(doq_error::request_cancelled),
          .stop_sending_error_code = static_cast<std::uint64_t>(doq_error::request_cancelled),
       };
+      config.local_endpoint = self->m_local;
 
       //
       // To the address c-ares has for the server, which is all it has, with the certificate
@@ -443,6 +464,7 @@ private:
    tls_options m_options;
    const log_function* m_logger; // null once stopped
    TcpEndpoint m_server;
+   std::optional<anyhttp::UdpEndpoint> m_local; // what c-ares bound its socket to, if anything
    anyhttp::quic::Connection m_connection;
    anyhttp::Event m_stop; // set by stop(), for the connection that is being made
    std::string m_sent; // what c-ares has sent of a message that is not complete yet
@@ -650,17 +672,16 @@ inline int quic_transport::on_getsockname(ares_socket_t fd, struct sockaddr* add
 }
 
 //
-// A local address to send from would be one for anyhttp's UDP socket, and the connection does not
-// take one, so a socket of ours is not bound at all: a channel with a local address set sends from
-// wherever the system routes it.
+// c-ares binds a socket to the channel's local address of its family, see resolver.hpp, and for
+// one of ours that is where the connection sends from.
 //
 inline int quic_transport::on_bind(ares_socket_t fd, const struct sockaddr* address,
                                    ares_socklen_t length)
 {
-   if (!find(fd))
-      return ::bind(fd, address, length);
+   if (auto* bridge = find(fd))
+      return bridge->bind(address, length);
 
-   return 0;
+   return ::bind(fd, address, length);
 }
 
 // --------------------------------------------------------------------------------------------------

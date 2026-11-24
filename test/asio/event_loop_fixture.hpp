@@ -64,9 +64,14 @@ protected:
       return ::run_until(context, std::move(done), limit);
    }
 
+   static c_ares_async::IpAddress ip_address(std::string_view address)
+   {
+      return boost::asio::ip::make_address(address);
+   }
+
    static c_ares_async::TcpEndpoint endpoint(std::string_view address, unsigned short port)
    {
-      return {boost::asio::ip::make_address(address), port};
+      return {ip_address(address), port};
    }
 
    boost::asio::io_context context;

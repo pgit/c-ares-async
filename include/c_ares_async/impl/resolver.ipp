@@ -419,6 +419,27 @@ inline error_code resolver::set_servers(std::string_view servers)
    return make_ares_error(ares_set_servers_csv(m_channel, list.c_str()));
 }
 
+//
+// c-ares wants the IPv4 address in host byte order and the IPv6 one as its 16 bytes, which are in
+// network byte order. Going by the bytes for both does without the byte order of to_uint(), which
+// the runtimes need not agree on. All zeros is no address at all, for c-ares as for bind(2).
+//
+inline void resolver::set_local_address(const IpAddress& address)
+{
+   detail::log_debug(m_logger, "sending from {}", address.to_string());
+   if (address.is_v4())
+   {
+      const auto bytes = address.to_v4().to_bytes();
+      ares_set_local_ip4(m_channel, (unsigned{bytes[0]} << 24) | (unsigned{bytes[1]} << 16) |
+                                       (unsigned{bytes[2]} << 8) | unsigned{bytes[3]});
+   }
+   else
+   {
+      const auto bytes = address.to_v6().to_bytes();
+      ares_set_local_ip6(m_channel, bytes.data());
+   }
+}
+
 inline void resolver::set_logger(log_function logger) { m_logger = std::move(logger); }
 
 inline resolver::~resolver()

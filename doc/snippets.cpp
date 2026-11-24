@@ -122,6 +122,18 @@ void use_these_servers(c_ares_async::resolver& resolver)
 }
 // [set-servers-end]
 
+// [local-address]
+void send_from(c_ares_async::resolver& resolver, const c_ares_async::IpAddress& v4,
+               const c_ares_async::IpAddress& v6)
+{
+   //
+   // One address for each family, as c-ares has it: the second call does not undo the first.
+   //
+   resolver.set_local_address(v4);
+   resolver.set_local_address(v6);
+}
+// [local-address-end]
+
 // [dns-over-tls]
 c_ares_async::Task<void> resolve_privately(c_ares_async::Executor executor, std::string host)
 {

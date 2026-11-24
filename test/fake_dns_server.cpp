@@ -91,7 +91,8 @@ struct fake_dns_server::state
 {
    explicit state(const any_io_executor& executor) : udp(executor), acceptor(executor) {}
 
-   std::vector<unsigned char> answer(std::span<const unsigned char> message, transport via);
+   std::vector<unsigned char> answer(std::span<const unsigned char> message, transport via,
+                                     std::string from);
    void add_answers(ares_dns_record_t* response, std::string owner, ares_dns_rec_type_t type) const;
 
    //
@@ -103,7 +104,8 @@ struct fake_dns_server::state
    static awaitable<void> serve_connection(std::shared_ptr<state> self, ip::tcp::socket socket);
 
    template <typename Stream>
-   static awaitable<void> serve_stream(std::shared_ptr<state> self, Stream& stream, transport via);
+   static awaitable<void> serve_stream(std::shared_ptr<state> self, Stream& stream, transport via,
+                                       std::string from);
 
 #if C_ARES_ASYNC_DOQ
    //
@@ -112,7 +114,7 @@ struct fake_dns_server::state
    static anyhttp::Task<void> serve_quic(std::shared_ptr<state> self,
                                          anyhttp::quic::Connection connection);
    static anyhttp::Task<void> serve_quic_stream(std::shared_ptr<state> self,
-                                                anyhttp::quic::Stream stream);
+                                                anyhttp::quic::Stream stream, std::string from);
 
    std::optional<anyhttp::server::Server> quic;
    bool quic_extra_message = false;
@@ -208,7 +210,7 @@ void fake_dns_server::state::add_answers(ares_dns_record_t* response, std::strin
 // The reply to one message, or nothing at all where there is none to give.
 //
 std::vector<unsigned char> fake_dns_server::state::answer(std::span<const unsigned char> message,
-                                                          transport via)
+                                                          transport via, std::string from)
 {
    ares_dns_record_t* parsed = nullptr;
    if (ares_dns_parse(message.data(), message.size(), 0, &parsed) != ARES_SUCCESS)
@@ -222,7 +224,7 @@ std::vector<unsigned char> fake_dns_server::state::answer(std::span<const unsign
    if (ares_dns_record_query_get(request.get(), 0, &name, &type, &qclass) != ARES_SUCCESS)
       return {};
 
-   queries.push_back({normalized(name), type, via});
+   queries.push_back({normalized(name), type, via, std::move(from)});
    if (silent)
       return {};
 
@@ -380,7 +382,8 @@ awaitable<void> fake_dns_server::state::serve_udp(std::shared_ptr<state> self)
       if (ec)
          co_return; // closed, which is how the server goes away
 
-      const auto reply = self->answer({message.data(), size}, transport::udp);
+      const auto reply =
+         self->answer({message.data(), size}, transport::udp, peer.address().to_string());
       if (!reply.empty())
          co_await self->udp.async_send_to(buffer(reply), peer, awaited);
    }
@@ -392,7 +395,7 @@ awaitable<void> fake_dns_server::state::serve_udp(std::shared_ptr<state> self)
 //
 template <typename Stream>
 awaitable<void> fake_dns_server::state::serve_stream(std::shared_ptr<state> self, Stream& stream,
-                                                     transport via)
+                                                     transport via, std::string from)
 {
    for (;;)
    {
@@ -404,7 +407,7 @@ awaitable<void> fake_dns_server::state::serve_stream(std::shared_ptr<state> self
       if (const auto [ec, size] = co_await async_read(stream, buffer(message), awaited); ec)
          co_return;
 
-      const auto reply = self->answer(message, via);
+      const auto reply = self->answer(message, via, from);
       if (reply.empty())
          continue;
 
@@ -419,9 +422,12 @@ awaitable<void> fake_dns_server::state::serve_stream(std::shared_ptr<state> self
 awaitable<void> fake_dns_server::state::serve_connection(std::shared_ptr<state> self,
                                                          ip::tcp::socket socket)
 {
+   error_code ignored;
+   auto from = socket.remote_endpoint(ignored).address().to_string();
+
    if (!self->tls)
    {
-      co_await serve_stream(self, socket, transport::tcp);
+      co_await serve_stream(self, socket, transport::tcp, std::move(from));
       co_return;
    }
 
@@ -430,7 +436,7 @@ awaitable<void> fake_dns_server::state::serve_connection(std::shared_ptr<state> 
       co_return; // the client did not like the certificate, most likely
 
    ++self->handshakes;
-   co_await serve_stream(self, stream, transport::tls);
+   co_await serve_stream(self, stream, transport::tls, std::move(from));
 }
 
 awaitable<void> fake_dns_server::state::serve_tcp(std::shared_ptr<state> self)
@@ -516,18 +522,20 @@ anyhttp::Task<void> fake_dns_server::state::serve_quic(std::shared_ptr<state> se
                                                        anyhttp::quic::Connection connection)
 {
    ++self->quic_connections;
+   const auto from = connection.remote_endpoint().address().to_string();
    for (;;)
    {
       auto [ec, stream] = co_await connection.accept_stream();
       if (ec)
          co_return;
 
-      anyhttp::launch(connection.get_executor(), serve_quic_stream(self, std::move(stream)));
+      anyhttp::launch(connection.get_executor(), serve_quic_stream(self, std::move(stream), from));
    }
 }
 
 anyhttp::Task<void> fake_dns_server::state::serve_quic_stream(std::shared_ptr<state> self,
-                                                              anyhttp::quic::Stream stream)
+                                                              anyhttp::quic::Stream stream,
+                                                              std::string from)
 {
    std::vector<unsigned char> query;
    std::array<unsigned char, 4096> buffer;
@@ -551,7 +559,8 @@ anyhttp::Task<void> fake_dns_server::state::serve_quic_stream(std::shared_ptr<st
       co_return;
    }
 
-   auto reply = self->answer({query.data() + 2, query.size() - 2}, transport::quic);
+   auto reply =
+      self->answer({query.data() + 2, query.size() - 2}, transport::quic, std::move(from));
    if (reply.empty())
       co_return; // silent: no answer, and the stream reset
 

@@ -31,6 +31,7 @@ using c_ares_async::tls_options;
 using testing::Contains;
 using testing::Each;
 using testing::ElementsAre;
+using testing::Field;
 using testing::HasSubstr;
 using testing::IsEmpty;
 using testing::Not;
@@ -280,6 +281,56 @@ TEST_F(DnsOverQuic, ReportsAServerThatIsNotThere)
 
    EXPECT_TRUE(ec);
    EXPECT_THAT(endpoints, IsEmpty());
+}
+
+//
+// c-ares binds a socket of the transport's as it would its own, and the bridge has anyhttp bind
+// the UDP socket of the connection there.
+//
+TEST_F(DnsOverQuic, SendsFromTheLocalAddress)
+{
+   make_resolver(quic({}, false));
+   resolver->set_local_address(ip_address("127.0.0.3"));
+
+   const auto [ec, endpoints] = resolve("www.example.test");
+
+   EXPECT_FALSE(ec) << ec.message();
+   EXPECT_THAT(endpoints, ElementsAre(endpoint("192.0.2.1", 443)));
+   EXPECT_EQ(server.quic_connections(), 1u);
+   EXPECT_THAT(server.queries(), Not(IsEmpty()));
+   EXPECT_THAT(server.queries(), Each(Field(&fake_dns_server::query::from, "127.0.0.3")));
+}
+
+//
+// An address the host does not have, which would fail the connection if it were used.
+//
+TEST_F(DnsOverQuic, KeepsTheLocalAddressToItsFamily)
+{
+   make_resolver(quic({}, false));
+   resolver->set_local_address(ip_address("2001:db8::1"));
+
+   const auto [ec, endpoints] = resolve("www.example.test");
+
+   EXPECT_FALSE(ec) << ec.message();
+   EXPECT_THAT(server.queries(), Not(IsEmpty()));
+   EXPECT_THAT(server.queries(), Each(Field(&fake_dns_server::query::from, "127.0.0.1")));
+}
+
+//
+// As for TCP and TLS, though the bind fails once the bridge connects, not in c-ares' abind(): the
+// end of the stream that c-ares reads then is what a connection that is refused comes to.
+//
+TEST_F(DnsOverQuic, FailsWhereTheLocalAddressIsNotOneOfTheHosts)
+{
+   make_resolver(quic({}, false));
+   resolver->set_local_address(ip_address("192.0.2.9"));
+
+   const auto [ec, endpoints] = resolve("www.example.test");
+
+   EXPECT_EQ(ec, c_ares_async::make_ares_error(ARES_ECONNREFUSED)) << ec.message();
+   EXPECT_THAT(endpoints, IsEmpty());
+   EXPECT_EQ(server.quic_connections(), 0u);
+   EXPECT_TRUE(logged(log_level::error, "connection to 127.0.0.1:"));
 }
 
 TEST_F(DnsOverQuic, GivesUpOnAServerThatBreaksTheProtocol)

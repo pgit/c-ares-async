@@ -51,6 +51,7 @@ public:
       std::string name;
       ares_dns_rec_type_t type;
       transport via;
+      std::string from; // the client's address, without the port
    };
 
    //

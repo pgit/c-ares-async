@@ -48,6 +48,10 @@ bridge for every socket that c-ares takes for a TCP connection:
 
 * ``aconnect()`` comes back at once, and starts the QUIC connection to the address c-ares has for
   the server. The queries that c-ares sends in the meantime wait in the bridge until it is there.
+* ``abind()`` comes before that where the resolver has a local address of the socket's family,
+  see :cpp:func:`resolver::set_local_address`. The bridge keeps it, and anyhttp binds the UDP
+  socket of the connection to it. An address that is not one of the host's fails the connection
+  then, not ``abind()`` as it would for TCP, and c-ares fails the lookup just the same.
 * ``asendto()`` takes all that c-ares sends, and cuts it into its messages. Each goes out on a
   stream of its own, with a message ID of 0 and the end of the stream after it (section 4.2.1).
   The answer gets the ID back that c-ares chose, and waits in the bridge for ``arecvfrom()``,
@@ -143,8 +147,12 @@ c-ares had given up on them and sent them again (`anyhttp#53
 <https://github.com/pgit/anyhttp/pull/55>`__ has it wait for the server to allow another stream, and
 serve those that wait in the order they started; what it used to be is ``try_open_stream()`` now.
 
-The pin is at the merge of `anyhttp#56 <https://github.com/pgit/anyhttp/pull/56>`__, which gives
-``quic::Config`` a local address and a device to send from, after anyhttp#55 and `anyhttp#51
+Nor could the client be told where to send from, which c-ares has an address for, of each family
+(`anyhttp#54 <https://github.com/pgit/anyhttp/issues/54>`__). `anyhttp#56
+<https://github.com/pgit/anyhttp/pull/56>`__ added ``quic::Config::local_endpoint``, and
+``quic::Config::device`` for an interface to send through.
+
+The pin is at the merge of anyhttp#56, after anyhttp#55 and `anyhttp#51
 <https://github.com/pgit/anyhttp/pull/51>`__: that one moved anyhttp's Capy and Corosio to the
 commits this library pins.
 
@@ -160,9 +168,9 @@ What is not there
 * **0-RTT and session resumption,** which anyhttp's client does not do: every connection is a full
   handshake, which ``ARES_FLAG_STAYOPEN`` keeps to one per server, until the connection idles out
   -- after 30 seconds, or what the server says.
-* **A local address to send from.** anyhttp's ``quic::connect()`` takes one now, but the bridge
-  does not pass one on, so a socket of the transport's is not bound, and a channel with a local
-  address set sends from wherever the system routes the datagrams.
+* **An interface to send through,** which c-ares binds its sockets to with ``SO_BINDTODEVICE``
+  (``ares_set_local_dev()``). The resolver takes none, on any transport, and the bridge turns down
+  the socket option, as it does all of them. ``quic::Config::device`` is there for when it does.
 
 anyhttp logs to spdlog's default logger, at the level of information for every connection it
 makes: a program that does not want that sets the level, as :src:`test/fake_dns_server.cpp` does.
