@@ -122,6 +122,14 @@ anyhttp is built for one runtime, and here that is the one of the build:
   executor's queue on Asio, as ``co_spawn()`` does, and right away on Corosio, where the caller is
   on the executor already. The connection is started from c-ares' ``aconnect()``, and the stream
   of a query from its ``asendto()``, neither of which is where they should run.
+* **No Asio.** ``c_ares_async::doq`` brings none of it along, as ``c_ares_async::corosio`` does
+  not: anyhttp's public headers have nothing of Asio on Corosio, and the bridge includes nothing
+  else of anyhttp's. The address that c-ares binds a socket to is made into an endpoint the way the
+  event loop makes every other one, not with anyhttp's ``io::from_sockaddr()``, which is in
+  ``anyhttp/net.hpp`` -- along with Asio's buffers, which anyhttp keeps for its own protocol code.
+  So a program that names nothing of Asio compiles nothing of it. The ``headers.self_contained``
+  test of a COROSIO build compiles each header on its own, and stops at the one that brings Asio
+  along.
 
 In the tests, anyhttp's server for DoQ runs on the resolver's ``corosio::io_context``, and the rest
 of the fake DNS server on Asio's, as for the other tests of a COROSIO build: both are stepped from

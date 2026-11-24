@@ -12,7 +12,6 @@
 #include <c_ares_async/detail/quic_transport.hpp> // NOLINT(misc-header-include-cycle)
 #include <c_ares_async/detail/socket_functions.hpp>
 
-#include <anyhttp/net.hpp>
 #include <anyhttp/quic.hpp>
 #include <anyhttp/runtime.hpp>
 
@@ -82,15 +81,22 @@ public:
    // of the connection that is bound, once there is one: an address that is not this host's
    // fails the connection, not this.
    //
+   // The endpoint is made the way the event loop makes every other one from c-ares, and moved
+   // over into a UDP one the way anyhttp does that -- on Corosio, the two are the same type.
+   // anyhttp's io::from_sockaddr() would do it in one go, but it is in anyhttp/net.hpp, which is
+   // none of anyhttp's public headers and brings Asio's buffers along on Corosio, into every
+   // translation unit that includes the resolver.
+   //
    int bind(const struct sockaddr* address, ares_socklen_t length) noexcept
    {
-      m_local = anyhttp::io::from_sockaddr(address, length);
-      if (!m_local)
+      const auto local = make_endpoint(address, length);
+      if (!local)
       {
          errno = EAFNOSUPPORT;
          return -1;
       }
 
+      m_local = anyhttp::UdpEndpoint{local->address(), local->port()};
       return 0;
    }
 
