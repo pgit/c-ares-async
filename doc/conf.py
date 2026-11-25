@@ -3,6 +3,8 @@
 # the XML that Doxygen makes of the public headers. 'cmake --build build --target docs' runs both
 # and says where the XML is and which version this is, see CMakeLists.txt in here.
 #
+from docutils import nodes
+
 project = "c-ares-async"
 author = "Peter Eisenlohr"
 copyright = "2026, Peter Eisenlohr"
@@ -36,3 +38,18 @@ nitpick_ignore_regex = [
     (r"cpp:.*", r"detail(::.*)?"),
     (r"cpp:identifier", r"c_ares_async(::errors)?"),
 ]
+
+
+def fix_dashes(app, doctree):
+    """Breathe 4.35 turns a "--" in a comment into the text "&#8212;", which then shows as just that.
+
+    What it stands for is lost by then, but Doxygen would only make an em dash of "---", which the
+    comments do not use. The same as in anyhttp's conf.py.
+    """
+    for node in list(doctree.findall(nodes.Text)):
+        if "&#8212;" in node:
+            node.parent.replace(node, nodes.Text(node.replace("&#8212;", "\N{EN DASH}")))
+
+
+def setup(app):
+    app.connect("doctree-read", fix_dashes)
