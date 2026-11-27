@@ -48,7 +48,7 @@ using c_ares_async::Task;
 
 struct Config
 {
-   bool verbose = false;
+   int verbosity = 0; // how many times -v was given
    bool native = false;
    bool ordered = false;
    bool color = false;
@@ -187,7 +187,9 @@ std::expected<Config, int> parseConfig(int argc, char* argv[])
    po::options_description desc("Allowed options");
    auto opts = desc.add_options();
    opts("help,h", "produce help message");
-   opts("verbose,v", po::bool_switch(&config.verbose), "enable verbose logging");
+   opts("verbose,v", po::value<std::vector<std::string>>()->zero_tokens(),
+        "show what the library has to say, and anyhttp's info; twice (-vv) for anyhttp's debug "
+        "and a ruler per step of the event loop");
    const auto native = std::format("use {} instead of c-ares", app::native_resolver::name);
    opts("native", po::bool_switch(&config.native), native.c_str());
    opts("service,s", po::value(&config.service)->default_value(config.service),
@@ -230,8 +232,12 @@ std::expected<Config, int> parseConfig(int argc, char* argv[])
    po::variables_map vm;
    try
    {
-      po::store(po::command_line_parser(argc, argv).options(desc).positional(positional).run(), vm);
+      const auto parsed =
+         po::command_line_parser(argc, argv).options(desc).positional(positional).run();
+      po::store(parsed, vm);
       po::notify(vm);
+      config.verbosity =
+         static_cast<int>(std::ranges::count(parsed.options, "verbose", &po::option::string_key));
    }
    catch (const po::error& ex)
    {
@@ -332,6 +338,37 @@ std::expected<Config, int> parseConfig(int argc, char* argv[])
 }
 
 //
+// The program, the library and anyhttp each log at a level of their own, so each gets a logger of
+// its own -- all three on the same sink. anyhttp logs to spdlog's default logger, so that one is
+// anyhttp's, the program has 'out' and the library 'library'. Without -v, there are the results
+// and whatever went wrong, -v adds what the library and anyhttp have to say, -vv anyhttp's debug.
+//
+std::shared_ptr<spdlog::logger> out;
+std::shared_ptr<spdlog::logger> library;
+
+void setupLogging(const Config& config)
+{
+   //
+   // spdlog makes up its own mind about the terminal, so it has to be told as well.
+   //
+   auto sink = std::make_shared<spdlog::sinks::stdout_color_sink_mt>(
+      config.color ? spdlog::color_mode::always : spdlog::color_mode::automatic);
+
+   out = std::make_shared<spdlog::logger>("resolve", sink);
+   library = std::make_shared<spdlog::logger>("c-ares-async", sink);
+   auto anyhttp = std::make_shared<spdlog::logger>("anyhttp", sink);
+
+   out->set_level(config.verbosity > 0 ? spdlog::level::debug : spdlog::level::info);
+   library->set_level(config.verbosity > 0 ? spdlog::level::debug : spdlog::level::warn);
+   anyhttp->set_level(config.verbosity > 1   ? spdlog::level::debug
+                      : config.verbosity > 0 ? spdlog::level::info
+                                             : spdlog::level::warn);
+
+   spdlog::set_default_logger(anyhttp);
+   spdlog::set_pattern("%H:%M:%S.%e %^%l%$ %v"); // the sink's, and with it all three loggers'
+}
+
+//
 // The library does not log by itself, it only says what there is to log.
 //
 void logToSpdlog(c_ares_async::log_level level, std::string_view message)
@@ -339,13 +376,13 @@ void logToSpdlog(c_ares_async::log_level level, std::string_view message)
    switch (level)
    {
    case c_ares_async::log_level::debug:
-      return spdlog::debug("{}", message);
+      return library->debug("{}", message);
    case c_ares_async::log_level::info:
-      return spdlog::info("{}", message);
+      return library->info("{}", message);
    case c_ares_async::log_level::warning:
-      return spdlog::warn("{}", message);
+      return library->warn("{}", message);
    case c_ares_async::log_level::error:
-      return spdlog::error("{}", message);
+      return library->error("{}", message);
    }
 }
 
@@ -434,18 +471,18 @@ void reportInFull(const std::string& name, const Lookup& lookup)
    const auto host = colored(name, Color::name);
 
    if (lookup.ec)
-      spdlog::error("{}: {}", host, lookup.ec.message());
+      out->error("{}: {}", host, lookup.ec.message());
 
    for (const auto& endpoint : lookup.endpoints)
-      spdlog::info("{}: {}", host, toText(endpoint.address()));
+      out->info("{}: {}", host, toText(endpoint.address()));
 
    if (isNoRecord(lookup.httpsEc))
-      spdlog::debug("{}: no HTTPS record", host);
+      out->debug("{}: no HTTPS record", host);
    else if (lookup.httpsEc)
-      spdlog::warn("{}: HTTPS: {}", host, lookup.httpsEc.message());
+      out->warn("{}: HTTPS: {}", host, lookup.httpsEc.message());
 
    for (const auto& record : lookup.records)
-      spdlog::info("{}: HTTPS {}", host, toText(record));
+      out->info("{}: HTTPS {}", host, toText(record));
 }
 
 //
@@ -547,7 +584,7 @@ Task<void> resolveAll(const Config& config, LookupFunction lookup)
    };
 
    const auto count = std::min<size_t>(config.concurrency, hosts.size());
-   spdlog::debug("resolving {} name(s), {} at a time", hosts.size(), count);
+   out->debug("resolving {} name(s), {} at a time", hosts.size(), count);
 
    std::vector<Task<void>> workers;
    workers.reserve(count);
@@ -562,7 +599,7 @@ Task<void> resolveAll(const Config& config, LookupFunction lookup)
 Task<Lookup> lookupWithNative(app::native_resolver& resolver, const Config& config,
                               const std::string& host)
 {
-   spdlog::debug("resolving {}:{}...", host, config.service);
+   out->debug("resolving {}:{}...", host, config.service);
    auto [ec, endpoints] = co_await resolver.resolve(host, config.service);
 
    co_return Lookup{.ec = ec, .endpoints = std::move(endpoints)};
@@ -573,16 +610,16 @@ Task<void> resolveWithNative(const c_ares_async::Executor& executor, const Confi
    co_await app::observe_cancellation();
 
    if (!config.servers.empty())
-      spdlog::warn("--server is not supported by {}, ignoring it", app::native_resolver::name);
+      out->warn("--server is not supported by {}, ignoring it", app::native_resolver::name);
 
    //
    // getaddrinfo() answers with addresses and nothing else, so this path is addresses only -- and
    // it blocks, so what the runtime has to call it on decides how many lookups it really has in
    // flight at a time.
    //
-   spdlog::debug("{} cannot look up HTTPS records", app::native_resolver::name);
+   out->debug("{} cannot look up HTTPS records", app::native_resolver::name);
    if (config.concurrency > 1)
-      spdlog::debug("{}", app::native_resolver::concurrency_note);
+      out->debug("{}", app::native_resolver::concurrency_note);
 
    app::native_resolver resolver(executor);
    co_await resolveAll(
@@ -598,7 +635,7 @@ Task<void> resolveWithNative(const c_ares_async::Executor& executor, const Confi
 Task<Lookup> lookupWithAres(c_ares_async::resolver& resolver, const Config& config,
                             const std::string& host)
 {
-   spdlog::debug("resolving {}:{}...", host, config.service);
+   out->debug("resolving {}:{}...", host, config.service);
 
    //
    // An address is no name to hang a record on, so there is only one question to ask -- and
@@ -689,14 +726,13 @@ Task<std::optional<std::string>> lookupServers(const c_ares_async::Executor& exe
          resolver->set_logger(&logToSpdlog);
       }
 
-      spdlog::debug("looking up DNS server {}...", named->name);
+      out->debug("looking up DNS server {}...", named->name);
       const auto [ec, endpoints] = co_await resolver->resolve(std::string(named->name), "");
       if (ec || endpoints.empty())
       {
          if (ec != c_ares_async::errors::canceled)
-            spdlog::error("--server {}: {}", named->name,
-                          ec ? ec.message()
-                             : c_ares_async::make_ares_error(ARES_ENODATA).message());
+            out->error("--server {}: {}", named->name,
+                       ec ? ec.message() : c_ares_async::make_ares_error(ARES_ENODATA).message());
          co_return std::nullopt;
       }
 
@@ -731,7 +767,7 @@ Task<void> resolveWithAres(const c_ares_async::Executor& executor, const Config&
    resolver.set_logger(&logToSpdlog);
    if (auto ec = resolver.set_servers(*servers))
    {
-      spdlog::error("--server '{}': {}", config.servers, ec.message());
+      out->error("--server '{}': {}", config.servers, ec.message());
       co_return;
    }
 
@@ -745,15 +781,8 @@ int main(int argc, char* argv[])
    if (!config)
       return config.error();
 
-   //
-   // spdlog makes up its own mind about the terminal, so it has to be told as well.
-   //
    useColor = config->color || isatty(STDOUT_FILENO);
-   if (config->color)
-      spdlog::set_default_logger(spdlog::stdout_color_mt("resolve", spdlog::color_mode::always));
-
-   spdlog::set_pattern("%H:%M:%S.%e %^%l%$ %v");
-   spdlog::set_level(config->verbose ? spdlog::level::debug : spdlog::level::info);
+   setupLogging(*config);
 
    //
    // c-ares' library initialization is the program's to do, not the resolver's: once, before any
@@ -763,7 +792,7 @@ int main(int argc, char* argv[])
    //
    if (const int status = ares_library_init(ARES_LIB_INIT_ALL); status != ARES_SUCCESS)
    {
-      spdlog::error("ares_library_init: {}", ares_strerror(status));
+      out->error("ares_library_init: {}", ares_strerror(status));
       return EXIT_FAILURE;
    }
 
@@ -778,11 +807,12 @@ int main(int argc, char* argv[])
       //
       // Ctrl-C cancels the lookups instead of stopping the event loop, so that everything gets a
       // chance to unwind -- the pending request belongs to c-ares, the loop knows nothing about it.
+      // The loop is stepped with a ruler per completion only at -vv.
       //
       app::run_main(context,
                     config->native ? resolveWithNative(executor, *config)
                                    : resolveWithAres(executor, *config),
-                    config->verbose);
+                    config->verbosity > 1);
    }
 
    ares_library_cleanup();

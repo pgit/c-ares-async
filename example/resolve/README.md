@@ -43,7 +43,14 @@ nothing else here cancels. The cancellation is a cancellation slot on Asio and a
 `std::stop_token` on Corosio, which is the one thing `Ctrl-C` looks different behind.
 
 `-v` also shows what the library has to say. It does not log by itself, so that is the function
-given to `resolver::set_logger()` passing the messages on to spdlog.
+given to `resolver::set_logger()` passing the messages on to spdlog. Without `-v`, the library only
+gets to say what went wrong, and the output is the results and nothing else.
+
+The same goes for anyhttp, which does the work behind `--doq` and `--doh` in a build with
+`C_ARES_ASYNC_ANYHTTP`: `-v` shows its info as well, `-vv` its debug too. `-vv` also steps the
+event loop one completion at a time, with a ruler (`--- 3 ---...`) per step. anyhttp logs to
+spdlog's default logger, so the program and the library each have a logger of their own instead,
+all of them on the same sink.
 
 ## HTTPS records
 
