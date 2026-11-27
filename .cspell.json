@@ -2,6 +2,7 @@
     "words": [
         "addrinfo",
         "alpn",
+        "anyhttp",
         "arecvfrom",
         "ares",
         "asan",

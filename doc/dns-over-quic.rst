@@ -10,11 +10,12 @@ two bytes of length that DNS over TCP puts in front of it. c-ares has no transpo
 QUIC either; the library takes `anyhttp <https://github.com/pgit/anyhttp>`__'s, which has plain
 QUIC streams next to HTTP/3, on ngtcp2.
 
-It is not there by default. ``-DC_ARES_ASYNC_DOQ=ON`` fetches and builds anyhttp, at the commit
-:src:`CMakeLists.txt` pins -- and with it Capy and Boost.HTTP, which anyhttp's HTTP/1.1 is built on,
-at pins of anyhttp's -- for the runtime that ``C_ARES_ASYNC_API`` chooses, and makes the target
-``c_ares_async::doq``: ``c_ares_async::asio`` or ``c_ares_async::corosio``, with anyhttp and
-``C_ARES_ASYNC_DOQ=1``. A resolver from a translation unit compiled with that takes
+It is not there by default. ``-DC_ARES_ASYNC_ANYHTTP=ON`` fetches and builds anyhttp, at the
+commit :src:`CMakeLists.txt` pins -- and with it Capy and Boost.HTTP, which anyhttp's HTTP/1.1 is
+built on, at pins of anyhttp's -- for the runtime that ``C_ARES_ASYNC_API`` chooses, and makes the
+target ``c_ares_async::anyhttp``: ``c_ares_async::asio`` or ``c_ares_async::corosio``, with anyhttp
+and ``C_ARES_ASYNC_ANYHTTP=1``. That brings :doc:`dns-over-https` along as well, with anyhttp's
+HTTP client. A resolver from a translation unit compiled with that takes
 :cpp:member:`tls_options::quic`:
 
 .. code-block:: cpp
@@ -27,7 +28,7 @@ at pins of anyhttp's -- for the runtime that ``C_ARES_ASYNC_API`` chooses, and m
 The rest is what it is for DNS over TLS: the servers move to port 853 where they name none,
 :cpp:member:`tls_options::hostname` is what the certificate is checked against and what goes into
 SNI, and :cpp:member:`tls_options::verify` can turn the check off, for testing. Without
-``C_ARES_ASYNC_DOQ``, :cpp:member:`tls_options::quic` makes the constructor throw
+``C_ARES_ASYNC_ANYHTTP``, :cpp:member:`tls_options::quic` makes the constructor throw
 :cpp:type:`system_error` with ``errc::operation_not_supported`` -- it does not fall back to DNS
 over TLS, or to anything else.
 
@@ -38,8 +39,10 @@ DNS over TLS works because c-ares does DNS over TCP and the transport puts TLS u
 stream, see :doc:`dns-over-tls`. QUIC is no byte stream to put under anything, but what goes on
 its streams is what DNS over TCP sends, one message at a time. So c-ares does DNS over TCP here as
 well -- ``ARES_FLAG_USEVC | ARES_FLAG_STAYOPEN`` -- and the transport goes in where the one for
-TLS does, in the socket functions. :src:`include/c_ares_async/impl/quic_transport.ipp` has a
-bridge for every socket that c-ares takes for a TCP connection:
+TLS does, in the socket functions. :src:`include/c_ares_async/detail/anyhttp_transport.hpp` has a
+bridge for every socket that c-ares takes for a TCP connection -- the c-ares side of it in
+:src:`include/c_ares_async/detail/anyhttp_bridge.hpp`, which DNS over HTTPS has as well, and the
+QUIC side in :src:`include/c_ares_async/detail/doq_bridge.hpp`:
 
 .. code-block:: text
 
@@ -97,15 +100,15 @@ On Corosio
 ----------
 
 anyhttp is built for one runtime, and here that is the one of the build:
-``-DC_ARES_ASYNC_API=COROSIO -DC_ARES_ASYNC_DOQ=ON`` builds it for Corosio, and makes
-``c_ares_async::doq`` from ``c_ares_async::corosio``. The ``doq-corosio`` preset does that, in
-``build-doq-corosio/``:
+``-DC_ARES_ASYNC_API=COROSIO -DC_ARES_ASYNC_ANYHTTP=ON`` builds it for Corosio, and makes
+``c_ares_async::anyhttp`` from ``c_ares_async::corosio``. The ``anyhttp-corosio`` preset does that,
+in ``build-anyhttp-corosio/``:
 
 .. code-block:: bash
 
-   cmake --preset doq-corosio
-   cmake --build --preset doq-corosio
-   ctest --preset doq-corosio
+   cmake --preset anyhttp-corosio
+   cmake --build --preset anyhttp-corosio
+   ctest --preset anyhttp-corosio
 
 * **OpenSSL, 3.5 or later.** anyhttp's Corosio build has Corosio's ``openssl_stream``, which uses an
   API that AWS-LC does not have, and ngtcp2 needs the QUIC API of OpenSSL 3.5. The configure stops
@@ -116,15 +119,16 @@ anyhttp is built for one runtime, and here that is the one of the build:
 * **An anyhttp of the program's own.** Where ``anyhttp::anyhttp`` is there already when this
   library is configured, it is used as it is, with the Capy and Corosio it was built on. It has to
   be built for the runtime of ``C_ARES_ASYNC_API``: the configure says so where ``ANYHTTP_API``
-  tells, and :src:`include/c_ares_async/detail/quic_transport.hpp` stops the compile where it does
-  not.
+  tells, and :src:`include/c_ares_async/detail/anyhttp_transport.hpp` stops the compile where it
+  does not.
 * **Each coroutine of the bridge yields first.** ``launch()`` starts a coroutine from the
   executor's queue on Asio, as ``co_spawn()`` does, and right away on Corosio, where the caller is
   on the executor already. The connection is started from c-ares' ``aconnect()``, and the stream
   of a query from its ``asendto()``, neither of which is where they should run.
-* **No Asio.** ``c_ares_async::doq`` brings none of it along, as ``c_ares_async::corosio`` does
-  not: anyhttp's public headers have nothing of Asio on Corosio, and the bridge includes nothing
-  else of anyhttp's. The address that c-ares binds a socket to is made into an endpoint the way the
+* **No Asio.** ``c_ares_async::anyhttp`` brings none of it along, as ``c_ares_async::corosio`` does
+  not: anyhttp's public headers have nothing of Asio on Corosio, and the bridges include nothing
+  else of anyhttp's -- ``runtime.hpp`` and ``quic.hpp``, and ``client.hpp`` and ``session.hpp``
+  for DNS over HTTPS. The address that c-ares binds a socket to is made into an endpoint the way the
   event loop makes every other one, not with anyhttp's ``io::from_sockaddr()``, which is in
   ``anyhttp/net.hpp`` -- along with Asio's buffers, which anyhttp keeps for its own protocol code.
   So a program that names nothing of Asio compiles nothing of it. The ``headers.self_contained``
@@ -160,18 +164,20 @@ Nor could the client be told where to send from, which c-ares has an address for
 <https://github.com/pgit/anyhttp/pull/56>`__ added ``quic::Config::local_endpoint``, and
 ``quic::Config::device`` for an interface to send through.
 
-The pin is at the merge of anyhttp#56, after anyhttp#55 and `anyhttp#51
+The pin is at the merge of `anyhttp#59 <https://github.com/pgit/anyhttp/pull/59>`__, for DNS over
+HTTPS, see :doc:`dns-over-https`. It comes after anyhttp#56, anyhttp#55 and `anyhttp#51
 <https://github.com/pgit/anyhttp/pull/51>`__: that one moved anyhttp's Capy and Corosio to the
 commits this library pins.
 
 What is not there
 -----------------
 
-* **Installing.** ``c_ares_async::doq`` is not installed, as anyhttp is built as part of this build
-  and not installed with it.
+* **Installing.** ``c_ares_async::anyhttp`` is not installed, as anyhttp is built as part of this
+  build and not installed with it.
 * **One program, one choice.** The resolver is the same object with and without
-  ``C_ARES_ASYNC_DOQ``, but its constructor is not: the translation units of a program have to
-  agree on the macro, which is what linking ``c_ares_async::doq`` wherever it uses a resolver does.
+  ``C_ARES_ASYNC_ANYHTTP``, but its constructor is not: the translation units of a program have to
+  agree on the macro, which is what linking ``c_ares_async::anyhttp`` wherever it uses a resolver
+  does.
 * **Padding.** Section 5.4 recommends padding the messages (RFC 8467), and c-ares does not pad.
 * **0-RTT and session resumption,** which anyhttp's client does not do: every connection is a full
   handshake, which ``ARES_FLAG_STAYOPEN`` keeps to one per server, until the connection idles out

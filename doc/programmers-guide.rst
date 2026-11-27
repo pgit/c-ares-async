@@ -196,10 +196,10 @@ more than one, :cpp:func:`resolver::set_local_address` chooses, for the servers 
    :start-after: // [local-address]
    :end-before: // [local-address-end]
 
-It is the same over UDP, TCP, DNS over TLS and DNS over QUIC. It holds for the connections made
-after it, so it goes with :cpp:func:`resolver::set_servers`, before the first lookup. An address
-that is not one of the host's is no error until there is something to send: then the lookups fail
-with ``ARES_ECONNREFUSED``, as for a server that cannot be reached.
+It is the same over UDP, TCP, DNS over TLS, DNS over QUIC and DNS over HTTPS. It holds for the
+connections made after it, so it goes with :cpp:func:`resolver::set_servers`, before the first
+lookup. An address that is not one of the host's is no error until there is something to send: then
+the lookups fail with ``ARES_ECONNREFUSED``, as for a server that cannot be reached.
 
 DNS over TLS
 ------------
@@ -219,6 +219,15 @@ for none of them:
    any certificate at all, which is for testing.
 
 How the transport works, and why one name is better off as one server, is in :doc:`dns-over-tls`.
+
+DNS over QUIC and DNS over HTTPS
+^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+With :cpp:member:`quic <tls_options::quic>` or :cpp:member:`https <tls_options::https>` as well, the
+queries go over QUIC, on port 853, or as HTTPS requests, on port 443, with the same
+:cpp:member:`hostname <tls_options::hostname>` and :cpp:member:`verify <tls_options::verify>`.
+Both take anyhttp, which a build has with ``-DC_ARES_ASYNC_ANYHTTP=ON``, see :doc:`dns-over-quic`
+and :doc:`dns-over-https`. Without it, a resolver asked for either cannot be made.
 
 .. _logging:
 

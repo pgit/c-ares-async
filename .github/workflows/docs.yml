@@ -39,7 +39,7 @@ jobs:
         run: |
           apt-get update
           apt-get -y install --no-install-recommends \
-            doxygen python3-sphinx python3-breathe python3-sphinx-rtd-theme
+            doxygen python3-pip python3-venv
 
       - name: Configure
         run: cmake --preset dev

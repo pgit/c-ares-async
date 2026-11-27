@@ -39,7 +39,7 @@ namespace c_ares_async::inline C_ARES_ASYNC_RUNTIME
 namespace detail
 {
 class tls_transport;
-class quic_transport;
+class anyhttp_transport;
 } // namespace detail
 
 // --------------------------------------------------------------------------------------------------
@@ -147,7 +147,8 @@ public:
 
        With `tls.enabled`, every query goes out over DNS over TLS instead of
        UDP or TCP in the clear, and the servers are asked on port 853. With
-       `tls.quic` as well, it is DNS over QUIC instead, on the same port.
+       `tls.quic` as well, it is DNS over QUIC instead, on the same port, and
+       with `tls.https`, DNS over HTTPS, on port 443.
 
        @param executor Runs everything the resolver does, and every
        completion handler that has no executor of its own.
@@ -158,8 +159,9 @@ public:
        @ref system_error where c-ares cannot be set up, with its status code
        as @ref make_ares_error makes it, and `std::runtime_error` where the
        TLS library cannot. @ref system_error with
-       `errc::operation_not_supported` for `tls.quic` where the library is
-       built without DNS over QUIC.
+       `errc::operation_not_supported` for `tls.quic` or `tls.https` where
+       the library is built without anyhttp, and with `errc::invalid_argument`
+       for both of them at once.
     */
    explicit resolver(executor_type executor, const tls_options& tls = {});
 
@@ -203,7 +205,8 @@ public:
        The list is one that `ares_set_servers_csv()` takes: addresses
        separated by commas, each with or without a port, as in "192.0.2.1",
        "192.0.2.1:5353" or "[2001:db8::1]:5353". An address without a port is
-       asked on port 53, or on port 853 over TLS.
+       asked on port 53, on port 853 over TLS and QUIC, and on port 443
+       over HTTPS.
 
        A server has to be given by its address. A resolver that is to ask a
        server it only has the name of needs that name resolved first, by
@@ -227,12 +230,13 @@ public:
        resolver starts out.
 
        It is the same over every transport. A socket of c-ares' is bound to
-       the address before it connects, and for DNS over QUIC the UDP socket
-       of the connection is.
+       the address before it connects, for DNS over QUIC the UDP socket of
+       the connection is, and for DNS over HTTPS its TCP socket.
 
        It holds for the sockets that are made from here on. A connection
-       that TCP, TLS or QUIC have up already goes on sending from where it
-       did, so this is for before the first lookup, as @ref set_servers is.
+       that TCP, TLS, QUIC or HTTPS have up already goes on sending from
+       where it did, so this is for before the first lookup, as
+       @ref set_servers is.
 
        @par Errors
        There are none here. A socket cannot be bound to an address that is
@@ -396,11 +400,12 @@ private:
    std::unique_ptr<detail::tls_transport> m_tls; // null unless DNS over TLS was asked for
 
    //
-   // Null unless DNS over QUIC was asked for. A shared_ptr, as that is what can be destroyed where
-   // the type is incomplete: it is defined where C_ARES_ASYNC_DOQ is 1, and not otherwise, and the
-   // resolver is the same object either way.
+   // Null unless DNS over QUIC or HTTPS was asked for. A shared_ptr, as that is what can be
+   // destroyed where the type is incomplete: it is defined where C_ARES_ASYNC_ANYHTTP is 1, and not
+   // otherwise, and the resolver is the same object either way.
    //
-   std::shared_ptr<detail::quic_transport> m_quic;
+   std::shared_ptr<detail::anyhttp_transport> m_anyhttp;
+   unsigned m_port = 0; // of a server that names none, where it is not 53: 853 or 443
    std::map<ares_socket_t, std::shared_ptr<socket_watch>> m_sockets;
 };
 

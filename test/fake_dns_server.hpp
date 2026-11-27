@@ -5,8 +5,9 @@
 // A DNS server on the loopback interface that answers from a table, for a resolver to be pointed
 // at. It speaks UDP, TCP and, once it has a certificate, DNS over TLS -- all on one port, as
 // c-ares has a single port for a server whichever way it asks. Where the tests are built with
-// DNS over QUIC, it speaks that as well, with anyhttp's server, on a port of its own -- and on
-// the runtime anyhttp is built for, which is the one of the tests, where the rest is on Asio.
+// anyhttp, it speaks DNS over QUIC and DNS over HTTPS as well, with anyhttp's server, each on a
+// port of its own -- and on the runtime anyhttp is built for, which is the one of the tests, where
+// the rest is on Asio.
 //
 // The messages are taken apart and put together by c-ares' own record functions, so the tests do
 // not come with a second implementation of the wire format to keep right.
@@ -17,7 +18,7 @@
 
 #include <boost/asio/any_io_executor.hpp>
 
-#if C_ARES_ASYNC_DOQ
+#if C_ARES_ASYNC_ANYHTTP
 #include <anyhttp/runtime.hpp>
 #endif
 
@@ -40,7 +41,8 @@ public:
       udp,
       tcp,
       tls,
-      quic
+      quic,
+      https
    };
 
    //
@@ -51,7 +53,19 @@ public:
       std::string name;
       ares_dns_rec_type_t type;
       transport via;
-      std::string from; // the client's address, without the port
+      std::string from; // the client's address, without the port -- unknown over HTTPS
+   };
+
+   //
+   // One request to the server for DNS over HTTPS, and the ID of the message in its body.
+   //
+   struct https_request
+   {
+      std::string method;
+      std::string path;
+      std::string content_type;
+      std::string accept;
+      unsigned id;
    };
 
    //
@@ -93,11 +107,13 @@ public:
 
    //
    // Makes every connection from here on start with a TLS handshake, the server presenting
-   // 'certificate'.
+   // 'certificate', and picking 'alpn' where the client offers it -- and breaking off the
+   // handshake where the client offers others only. Without 'alpn' it does no ALPN, and a client
+   // offering some gets none, as from most servers.
    //
-   void use_tls(const test_certificate& certificate);
+   void use_tls(const test_certificate& certificate, std::string alpn = {});
 
-#if C_ARES_ASYNC_DOQ
+#if C_ARES_ASYNC_ANYHTTP
    //
    // Starts serving DNS over QUIC on a port of its own, the server presenting 'certificate',
    // dropping a connection that has been quiet for 'idle_timeout', and allowing a client
@@ -135,6 +151,40 @@ public:
 
    std::size_t quic_connections() const; // that negotiated "doq"
    const std::vector<unsigned>& quic_ids() const; // the message ID of every query, in order
+
+   //
+   // Starts serving DNS over HTTPS on a port of its own, HTTP/2 and HTTP/1.1, the server
+   // presenting 'certificate', answering POSTs to 'path', and allowing a client 'max_streams'
+   // requests at once over HTTP/2. On 'executor', as for use_quic().
+   //
+   void use_https(const anyhttp::Executor& executor, const test_certificate& certificate,
+                  std::string path = "/dns-query", std::uint64_t max_streams = 100);
+
+   //
+   // Where it serves DNS over HTTPS, the way resolver::set_servers() takes it.
+   //
+   std::string https_address() const;
+
+   //
+   // Ends every connection, and listens again on the same port, as a server that has gone away
+   // and come back.
+   //
+   void restart_https();
+
+   //
+   // Ways of not being a DoH server: answering every request with 'status' and no body, and
+   // answering the queries with a body of another 'type'.
+   //
+   void set_https_status(unsigned status);
+   void set_https_content_type(std::string type);
+
+   //
+   // As set_quic_hold(): the query is read, and its request kept with no response, until the
+   // server shuts down.
+   //
+   void set_https_hold(bool hold);
+
+   const std::vector<https_request>& https_requests() const;
 #endif
 
    //
@@ -145,6 +195,7 @@ public:
    std::size_t count(transport via) const;
    std::size_t connections() const; // accepted, whatever became of them
    std::size_t handshakes() const; // TLS handshakes that went through
+   const std::vector<std::string>& alpn_offered() const; // in ALPN, by the last TLS client
 
 private:
    struct state;

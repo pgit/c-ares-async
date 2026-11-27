@@ -3,7 +3,7 @@
 
 //
 // DNS over QUIC (RFC 9250), against anyhttp's server with a certificate made up for the occasion.
-// Only built where the tests are on c_ares_async::doq, on either runtime.
+// Only built where the tests are on c_ares_async::anyhttp, on either runtime.
 //
 #include "resolver_fixture.hpp"
 

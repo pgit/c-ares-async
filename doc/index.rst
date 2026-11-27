@@ -6,7 +6,7 @@ asynchronous operations, using either `Asio
 <https://www.boost.org/doc/libs/release/doc/html/boost_asio.html>`__ or `Corosio
 <https://github.com/cppalliance/corosio>`__ as the async runtime: no thread of its own, any number
 of lookups in flight at once, addresses as well as HTTPS records, and over UDP, TCP, DNS over TLS
-or, with anyhttp's QUIC, DNS over QUIC.
+or, with anyhttp, DNS over QUIC and DNS over HTTPS.
 
 **THIS REPOSITORY IS PURELY EXPERIMENTAL**
 
@@ -28,6 +28,7 @@ library, in the order it does it, and links to :doc:`reference` for everything i
    https-records
    dns-over-tls
    dns-over-quic
+   dns-over-https
 
 .. toctree::
    :maxdepth: 2

@@ -270,6 +270,63 @@ TEST_F(DnsOverTls, DoesNotCallAnUncheckedCertificateVerified)
    EXPECT_THAT(messages, Contains(Pair(log_level::info, HasSubstr("NOT verified"))));
 }
 
+TEST_F(DnsOverTls, OffersDotInAlpn)
+{
+   make_resolver({.enabled = true, .hostname = {}, .verify = false});
+
+   const auto [ec, endpoints] = resolve("www.example.test");
+
+   EXPECT_FALSE(ec) << ec.message();
+   EXPECT_THAT(server.alpn_offered(), ElementsAre("dot"));
+
+   // the server does no ALPN, which is no reason not to go on
+   EXPECT_THAT(messages, Contains(Pair(log_level::info, HasSubstr(", alpn=none"))));
+}
+
+TEST_F(DnsOverTls, SaysWhichProtocolTheServerPicked)
+{
+   server.use_tls(certificate, "dot");
+   make_resolver({.enabled = true, .hostname = {}, .verify = false});
+
+   const auto [ec, endpoints] = resolve("www.example.test");
+
+   EXPECT_FALSE(ec) << ec.message();
+   EXPECT_THAT(messages, Contains(Pair(log_level::info, HasSubstr(", alpn=dot"))));
+}
+
+TEST_F(DnsOverTls, OffersNoAlpnWhenToldNotTo)
+{
+   make_resolver({.enabled = true, .hostname = {}, .verify = false, .alpn = false});
+
+   const auto [ec, endpoints] = resolve("www.example.test");
+
+   EXPECT_FALSE(ec) << ec.message();
+   EXPECT_EQ(server.handshakes(), 1u);
+   EXPECT_THAT(server.alpn_offered(), IsEmpty());
+   EXPECT_THAT(messages, Each(Pair(testing::_, Not(HasSubstr("alpn=")))));
+}
+
+//
+// A server that does ALPN, though not for DNS, breaks off the handshake where it is offered
+// "dot" -- which is what turning the offer off is for.
+//
+TEST_F(DnsOverTls, GetsThroughToAServerThatDoesAlpnForOthersOnlyWithoutIt)
+{
+   server.use_tls(certificate, "h2");
+
+   make_resolver({.enabled = true, .hostname = {}, .verify = false});
+   const auto [refused, nothing] = resolve("www.example.test");
+   EXPECT_TRUE(refused);
+   EXPECT_EQ(server.handshakes(), 0u);
+   EXPECT_THAT(messages, Contains(Pair(log_level::error, HasSubstr("TLS handshake failed"))));
+
+   make_resolver({.enabled = true, .hostname = {}, .verify = false, .alpn = false});
+   const auto [ec, endpoints] = resolve("www.example.test");
+   EXPECT_FALSE(ec) << ec.message();
+   EXPECT_THAT(endpoints, ElementsAre(endpoint("192.0.2.1", 443)));
+   EXPECT_EQ(server.handshakes(), 1u);
+}
+
 TEST_F(DnsOverTls, ReportsAServerThatIsNotThere)
 {
    make_resolver({.enabled = true, .hostname = {}, .verify = false});
@@ -318,7 +375,7 @@ TEST_F(DnsOverTls, FailsWhereTheLocalAddressIsNotOneOfTheHosts)
    EXPECT_EQ(server.connections(), 0u);
 }
 
-#if !C_ARES_ASYNC_DOQ
+#if !C_ARES_ASYNC_ANYHTTP
 TEST_F(DnsOverTls, RefusesDnsOverQuicWhereItIsNotBuiltIn)
 {
    //
@@ -328,6 +385,19 @@ TEST_F(DnsOverTls, RefusesDnsOverQuicWhereItIsNotBuiltIn)
    {
       c_ares_async::resolver quic(executor(), {.enabled = true, .quic = true});
       ADD_FAILURE() << "a resolver for DNS over QUIC without it";
+   }
+   catch (const c_ares_async::system_error& error)
+   {
+      EXPECT_EQ(error.code(), c_ares_async::errc::operation_not_supported) << error.what();
+   }
+}
+
+TEST_F(DnsOverTls, RefusesDnsOverHttpsWhereItIsNotBuiltIn)
+{
+   try
+   {
+      c_ares_async::resolver https(executor(), {.enabled = true, .https = true});
+      ADD_FAILURE() << "a resolver for DNS over HTTPS without it";
    }
    catch (const c_ares_async::system_error& error)
    {
