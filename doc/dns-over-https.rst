@@ -29,6 +29,12 @@ server, ``/dns-query`` unless told otherwise, which is where most servers have i
 :cpp:member:`tls_options::hostname` is what the certificate is checked against and what goes into
 SNI, and :cpp:member:`tls_options::verify` can turn the check off, for testing.
 
+ALPN offers ``h2`` and ``http/1.1``, and the session speaks what the server picks, HTTP/2 wherever
+it has it. Without :cpp:member:`tls_options::http2`, ``http/1.1`` is all that ALPN offers, and the
+session speaks HTTP/1.1 with any server -- one query at a time, see below. That is for a server
+whose HTTP/2 is not to be relied on, or for seeing what its HTTP/1.1 does; ``--doh-http1`` is the
+example's for it.
+
 Without ``C_ARES_ASYNC_ANYHTTP``, :cpp:member:`tls_options::https` makes the constructor throw
 :cpp:type:`system_error` with ``errc::operation_not_supported``, and with
 :cpp:member:`tls_options::quic` as well, with ``errc::invalid_argument``: it is the one or the
@@ -60,7 +66,7 @@ HTTPS:
    c-ares <--[len][answer]-- arecvfrom() <-- bridge <-- 200, ID put back   <-- server
 
 * ``aconnect()`` comes back at once, and starts the session with the server, offering HTTP/2 and
-  HTTP/1.1 by ALPN. The queries that c-ares sends in the meantime wait in the bridge until it is
+  HTTP/1.1 by ALPN, or HTTP/1.1 alone. The queries that c-ares sends in the meantime wait in the bridge until it is
   there.
 * ``abind()`` comes before that where the resolver has a local address of the socket's family, see
   :cpp:func:`resolver::set_local_address`, and anyhttp binds its TCP socket to it then.

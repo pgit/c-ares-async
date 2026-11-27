@@ -204,11 +204,15 @@ std::expected<Config, int> parseConfig(int argc, char* argv[])
         "use DNS over QUIC (RFC 9250) instead -- on UDP port 853, with --tls-hostname and "
         "--tls-no-verify as for --dot (c-ares only, and a build with C_ARES_ASYNC_ANYHTTP)");
    opts("doh", po::bool_switch(&config.tls.https),
-        "use DNS over HTTPS (RFC 8484) instead -- POSTs on TCP port 443, over HTTP/2, with "
-        "--tls-hostname and --tls-no-verify as for --dot (c-ares only, and a build with "
-        "C_ARES_ASYNC_ANYHTTP)");
+        "use DNS over HTTPS (RFC 8484) instead -- POSTs on TCP port 443, over HTTP/2 unless "
+        "told --doh-http1, with --tls-hostname and --tls-no-verify as for --dot (c-ares only, "
+        "and a build with C_ARES_ASYNC_ANYHTTP)");
    opts("doh-path", po::value(&config.tls.path)->default_value(config.tls.path),
         "path of the URL that --doh sends the queries to");
+   opts("doh-http1",
+        po::value<bool>()->zero_tokens()->notifier([&config](bool) { config.tls.http2 = false; }),
+        "offer \"http/1.1\" only in ALPN with --doh, not \"h2\", so that it speaks HTTP/1.1 "
+        "with a server that has HTTP/2 as well");
    opts("tls-hostname", po::value(&config.tls.hostname),
         "server name to use for SNI and to verify the certificate against, e.g. "
         "one.one.one.one -- a host name given as --server is used unless told otherwise");
@@ -284,6 +288,12 @@ std::expected<Config, int> parseConfig(int argc, char* argv[])
    if (!vm["doh-path"].defaulted() && !config.tls.https)
    {
       std::cerr << "--doh-path only applies with --doh\n" << desc;
+      return std::unexpected(EXIT_FAILURE);
+   }
+
+   if (!config.tls.http2 && !config.tls.https)
+   {
+      std::cerr << "--doh-http1 only applies with --doh\n" << desc;
       return std::unexpected(EXIT_FAILURE);
    }
 
