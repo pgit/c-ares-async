@@ -149,11 +149,11 @@ private:
       // options let ALPN offer.
       //
       self->m_url = make_url(self->options(), self->server_endpoint());
-      anyhttp::client::Config config{
-         .url = self->m_url,
-         .endpoints = {self->server_endpoint()},
-         .protocol = self->options().http2 ? anyhttp::Protocol::h2 : anyhttp::Protocol::h1,
-         .tls_verify = self->options().verify};
+      anyhttp::client::Config config{.url = self->m_url,
+                                     .endpoints = {self->server_endpoint()},
+                                     .protocol = self->options().http2 ? anyhttp::Protocol::h2
+                                                                       : anyhttp::Protocol::h1,
+                                     .tls_verify = self->options().verify};
       if (const auto& local = self->local_endpoint()) // see doq_bridge
       {
          config.local_address = local->address().to_string();
