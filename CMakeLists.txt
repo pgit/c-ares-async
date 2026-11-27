@@ -64,7 +64,7 @@ endif()
 option(C_ARES_ASYNC_BUILD_TESTS "Build the tests of c_ares_async" ${c_ares_async_tests_default})
 option(C_ARES_ASYNC_BUILD_EXAMPLES "Build the examples of c_ares_async" ${PROJECT_IS_TOP_LEVEL})
 option(C_ARES_ASYNC_BUILD_DOCS
-       "Build the code of the guide, and add the 'docs' target where Doxygen and Sphinx are there"
+       "Build the code of the guide, and add the 'docs' target where Doxygen and Python are there"
        ${PROJECT_IS_TOP_LEVEL})
 option(C_ARES_ASYNC_INSTALL "Generate the install rules of c_ares_async" ${PROJECT_IS_TOP_LEVEL})
 

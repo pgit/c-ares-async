@@ -7,7 +7,7 @@ target_link_libraries(c_ares_async_doc_snippets PRIVATE ${c_ares_async_target})
 #
 # The 'docs' target: the guide and the reference, as HTML. Sphinx makes the pages, and Breathe gets
 # what goes into the reference from Doxygen, which reads the comments in the public headers. It is
-# not part of 'all', and not there at all where one of the two is not.
+# not part of 'all', and not there at all where there is no doxygen or no python3.
 #
 #    cmake --build build --target docs
 #
@@ -15,10 +15,10 @@ target_link_libraries(c_ares_async_doc_snippets PRIVATE ${c_ares_async_target})
 # the runtime of the build nor on what that runtime needs. See Doxyfile.in.
 #
 find_program(DOXYGEN_EXECUTABLE doxygen DOC "Doxygen, which reads the comments in the headers")
-find_program(SPHINX_EXECUTABLE sphinx-build DOC "Sphinx, which makes the documentation")
+find_package(Python3 COMPONENTS Interpreter)
 
-if (NOT DOXYGEN_EXECUTABLE OR NOT SPHINX_EXECUTABLE)
-    message(STATUS "c_ares_async: no 'docs' target, as that takes both doxygen and sphinx-build")
+if (NOT DOXYGEN_EXECUTABLE OR NOT Python3_Interpreter_FOUND)
+    message(STATUS "c_ares_async: no 'docs' target, as that takes both doxygen and python3")
     return()
 endif()
 
@@ -26,6 +26,26 @@ configure_file(Doxyfile.in Doxyfile @ONLY)
 
 set(C_ARES_ASYNC_DOCS_DIR "${CMAKE_CURRENT_BINARY_DIR}/html"
     CACHE PATH "Where the 'docs' target puts the documentation")
+
+#
+# Sphinx, Breathe and the theme are not taken from the system, but installed on demand, the first
+# time the target is made, at the versions requirements.txt pins, into a virtual environment of
+# this tree. Changing a pin installs them again. That takes the network, and python3-venv. The same
+# as in anyhttp.
+#
+set(docs_venv "${CMAKE_CURRENT_BINARY_DIR}/venv")
+set(docs_venv_stamp "${docs_venv}/requirements.stamp")
+set(SPHINX_EXECUTABLE "${docs_venv}/bin/sphinx-build")
+
+add_custom_command(
+    OUTPUT "${docs_venv_stamp}"
+    COMMAND "${Python3_EXECUTABLE}" -m venv --clear "${docs_venv}"
+    COMMAND "${docs_venv}/bin/pip" install --quiet --disable-pip-version-check
+            -r "${CMAKE_CURRENT_SOURCE_DIR}/requirements.txt"
+    COMMAND "${CMAKE_COMMAND}" -E touch "${docs_venv_stamp}"
+    DEPENDS "${CMAKE_CURRENT_SOURCE_DIR}/requirements.txt"
+    COMMENT "Installing the documentation tools into ${docs_venv}"
+    VERBATIM)
 
 #
 # With -E, as a warning in a page that a previous run has read already would not show otherwise:
@@ -44,5 +64,6 @@ add_custom_target(
         -D "release=${PROJECT_VERSION}"
         -D "version=${PROJECT_VERSION_MAJOR}.${PROJECT_VERSION_MINOR}"
         "${CMAKE_CURRENT_SOURCE_DIR}" "${C_ARES_ASYNC_DOCS_DIR}"
+    DEPENDS "${docs_venv_stamp}"
     COMMENT "Making the documentation in ${C_ARES_ASYNC_DOCS_DIR}"
     VERBATIM)

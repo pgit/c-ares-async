@@ -152,7 +152,7 @@ include those of the TLS library, which is how they tell OpenSSL and AWS-LC apar
 | `C_ARES_ASYNC_ANYHTTP` | `OFF` | Adds DNS over QUIC and DNS over HTTPS: fetches and builds anyhttp, for its QUIC and its HTTP client (and with it Capy and Boost.HTTP), and makes the target `c_ares_async::anyhttp`, which the tests and examples then link. On either runtime, on Corosio with OpenSSL only, and not installed. See [doc/dns-over-quic.rst](doc/dns-over-quic.rst) and [doc/dns-over-https.rst](doc/dns-over-https.rst). |
 | `C_ARES_ASYNC_BUILD_TESTS` | top-level only | Builds the tests. Also off where `BUILD_TESTING` is. |
 | `C_ARES_ASYNC_BUILD_EXAMPLES` | top-level only | Builds the examples. |
-| `C_ARES_ASYNC_BUILD_DOCS` | top-level only | Builds the code of the guide, and adds the `docs` target where there is a `doxygen` and a `sphinx-build` to make them with. |
+| `C_ARES_ASYNC_BUILD_DOCS` | top-level only | Builds the code of the guide, and adds the `docs` target where there is a `doxygen` and a `python3` to make them with. |
 | `C_ARES_ASYNC_INSTALL` | top-level only | Generates the install rules: the headers and the CMake package, for both runtimes. |
 
 ## Building, testing, installing
