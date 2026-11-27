@@ -1,4 +1,6 @@
 # c-ares-async
+[![CI](https://github.com/pgit/c-ares-async/actions/workflows/ci.yml/badge.svg)](https://github.com/pgit/c-ares-async/actions/workflows/ci.yml)
+[![Documentation](https://img.shields.io/badge/documentation-read-blue)](https://pgit.github.io/c-ares-async/)
 
 A small, header-only wrapper around the [c-ares](https://c-ares.org/) DNS library that makes its
 lookups asynchronous operations, using either
