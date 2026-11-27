@@ -98,10 +98,21 @@ inline std::string distinguished_name(const X509_NAME* name)
 //
 // What was negotiated.
 //
-inline std::string handshake_info(SSL* ssl)
+inline std::string handshake_info(SSL* ssl, bool alpn_offered)
 {
-   return std::format("{}, cipher={}, group={}{}", SSL_get_version(ssl), SSL_get_cipher_name(ssl),
-                      key_exchange(ssl), SSL_session_reused(ssl) ? ", resumed" : "");
+   std::string alpn;
+   if (alpn_offered)
+   {
+      const unsigned char* selected = nullptr;
+      unsigned int length = 0;
+      SSL_get0_alpn_selected(ssl, &selected, &length);
+      alpn = length ? std::format(", alpn={}",
+                                  std::string_view(reinterpret_cast<const char*>(selected), length))
+                    : ", alpn=none"; // offered, and the server did not pick it
+   }
+
+   return std::format("{}, cipher={}, group={}{}{}", SSL_get_version(ssl), SSL_get_cipher_name(ssl),
+                      key_exchange(ssl), alpn, SSL_session_reused(ssl) ? ", resumed" : "");
 }
 
 //
@@ -165,6 +176,20 @@ inline tls_transport::tls_transport(tls_options options, const log_function& log
    // and is happy with a partial write -- which is exactly what these two modes allow.
    //
    SSL_CTX_set_mode(m_context, SSL_MODE_ENABLE_PARTIAL_WRITE | SSL_MODE_ACCEPT_MOVING_WRITE_BUFFER);
+
+   //
+   // In wire format: each protocol prefixed with its length. Unlike nearly everything else in
+   // OpenSSL, this one returns 0 on success -- as in AWS-LC.
+   //
+   if (m_options.alpn)
+   {
+      static constexpr std::array<unsigned char, 4> dot{3, 'd', 'o', 't'};
+      if (SSL_CTX_set_alpn_protos(m_context, dot.data(), dot.size()) != 0)
+      {
+         SSL_CTX_free(m_context);
+         throw std::runtime_error("SSL_CTX_set_alpn_protos: " + ssl_error());
+      }
+   }
 
    if (m_options.verify)
    {
@@ -258,7 +283,8 @@ inline tls_transport::interest tls_transport::advance(ares_socket_t fd, bool wri
    if (result == 1)
    {
       session->state = tls_session::phase::established;
-      log_info(m_logger, "fd={} TLS established: {}", fd, handshake_info(session->ssl));
+      log_info(m_logger, "fd={} TLS established: {}", fd,
+               handshake_info(session->ssl, m_options.alpn));
       log_info(m_logger, "fd={} TLS peer: {}", fd, peer_info(session->ssl));
       return interest::none;
    }

@@ -58,6 +58,23 @@ logger, and nowhere else:
 
    error TLS handshake failed: hostname mismatch
 
+ALPN
+----
+
+DNS over TLS as RFC 7858 has it does without ALPN, but there is a protocol ID for it: ``dot``,
+registered by RFC 9103, which has zone transfers over TLS insist on it, and what RFC 9461 has as
+``alpn=dot`` in SVCB records. The transport offers it, and says what the server picked in the
+message on the handshake -- ``alpn=dot``, or ``alpn=none`` from a server that does no ALPN or does
+not care, which is most of them:
+
+.. code-block:: text
+
+   info fd=8 TLS established: TLSv1.3, cipher=TLS_AES_256_GCM_SHA384, group=X25519 (253 bits), alpn=dot
+
+A server that does ALPN for other protocols only is meant to break off the handshake for it
+(RFC 7301, section 3.2), and :cpp:member:`tls_options::alpn` set to false gets through to that one.
+DNS over QUIC and DNS over HTTPS keep their own -- ``doq``, and ``h2`` or ``http/1.1`` -- either way.
+
 One server per name
 -------------------
 

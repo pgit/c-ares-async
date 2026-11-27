@@ -148,6 +148,8 @@ struct fake_dns_server::state : std::enable_shared_from_this<fake_dns_server::st
    ip::udp::socket udp;
    ip::tcp::acceptor acceptor;
    std::optional<ssl::context> tls;
+   std::string alpn; // that the server picks where it is offered
+   std::vector<std::string> alpn_offered;
 
    std::map<std::string, records, std::less<>> zone;
    bool silent = false;
@@ -367,11 +369,45 @@ void fake_dns_server::set_rcode(ares_dns_rcode_t rcode) { m_state->rcode = rcode
 
 void fake_dns_server::set_truncate_udp(bool truncate) { m_state->truncate_udp = truncate; }
 
-void fake_dns_server::use_tls(const test_certificate& certificate)
+void fake_dns_server::use_tls(const test_certificate& certificate, std::string alpn)
 {
    auto& tls = m_state->tls.emplace(ssl::context::tls_server);
    tls.use_certificate_chain(buffer(certificate.certificate_pem));
    tls.use_private_key(buffer(certificate.key_pem), ssl::context::pem);
+   m_state->alpn = std::move(alpn);
+
+   //
+   // Called where the client offers anything at all, which is where what it offered is known.
+   // Without a protocol of its own, the server lets the handshake go on without one, as a server
+   // that does not do ALPN would. With one, and the client offering others only, it breaks off
+   // the handshake, as RFC 7301 has it.
+   //
+   SSL_CTX_set_alpn_select_cb(
+      tls.native_handle(),
+      [](SSL*, const unsigned char** out, unsigned char* out_length, const unsigned char* in,
+         unsigned int in_length, void* arg) -> int {
+         auto& self = *static_cast<state*>(arg);
+         self.alpn_offered.clear();
+         int result = self.alpn.empty() ? SSL_TLSEXT_ERR_NOACK : SSL_TLSEXT_ERR_ALERT_FATAL;
+         for (unsigned int i = 0; i < in_length; i += 1u + in[i])
+         {
+            const std::string_view protocol(reinterpret_cast<const char*>(in + i + 1), in[i]);
+            self.alpn_offered.emplace_back(protocol);
+            if (result != SSL_TLSEXT_ERR_OK && protocol == self.alpn)
+            {
+               *out = in + i + 1;
+               *out_length = in[i];
+               result = SSL_TLSEXT_ERR_OK;
+            }
+         }
+         return result;
+      },
+      m_state.get());
+}
+
+const std::vector<std::string>& fake_dns_server::alpn_offered() const
+{
+   return m_state->alpn_offered;
 }
 
 const std::vector<fake_dns_server::query>& fake_dns_server::queries() const
@@ -457,6 +493,7 @@ awaitable<void> fake_dns_server::state::serve_connection(std::shared_ptr<state> 
    }
 
    ssl::stream<ip::tcp::socket> stream(std::move(socket), *self->tls);
+   self->alpn_offered.clear(); // the ALPN callback is not called for a client that offers none
    if (const auto [ec] = co_await stream.async_handshake(ssl::stream_base::server, awaited); ec)
       co_return; // the client did not like the certificate, most likely
 

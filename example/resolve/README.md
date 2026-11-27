@@ -158,6 +158,11 @@ $ build/example/resolve/resolve --dot --server 1.1.1.1 --tls-hostname wrong.exam
 13:32:27.624 error www.google.com: Could not contact DNS servers
 ```
 
+`--dot` offers `dot` in ALPN, and `-v` shows what the server picked: `alpn=dot` from
+`dns.quad9.net`, `alpn=none` from `one.one.one.one` and most others, which do no ALPN. `--no-alpn`
+leaves the offer out, for a server that does ALPN for other protocols only and breaks off the
+handshake when offered one it does not know.
+
 How the transport works is in [doc/dns-over-tls.rst](../../doc/dns-over-tls.rst).
 
 ## Other servers

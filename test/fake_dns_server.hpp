@@ -107,9 +107,11 @@ public:
 
    //
    // Makes every connection from here on start with a TLS handshake, the server presenting
-   // 'certificate'.
+   // 'certificate', and picking 'alpn' where the client offers it -- and breaking off the
+   // handshake where the client offers others only. Without 'alpn' it does no ALPN, and a client
+   // offering some gets none, as from most servers.
    //
-   void use_tls(const test_certificate& certificate);
+   void use_tls(const test_certificate& certificate, std::string alpn = {});
 
 #if C_ARES_ASYNC_ANYHTTP
    //
@@ -193,6 +195,7 @@ public:
    std::size_t count(transport via) const;
    std::size_t connections() const; // accepted, whatever became of them
    std::size_t handshakes() const; // TLS handshakes that went through
+   const std::vector<std::string>& alpn_offered() const; // in ALPN, by the last TLS client
 
 private:
    struct state;

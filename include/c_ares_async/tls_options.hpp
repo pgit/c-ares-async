@@ -71,6 +71,22 @@ struct tls_options
     */
    bool verify = true;
 
+   /** Whether DNS over TLS offers `dot` in ALPN, the protocol ID that is
+       registered for it (RFC 9103, which has zone transfers over TLS insist
+       on it; RFC 9461 has it as `alpn=dot` in SVCB records).
+
+       Plain DNS over TLS (RFC 7858) does without, and a server that does not
+       do ALPN, or does not care, ignores the offer -- most of them do. One
+       that does ALPN for other protocols only is meant to break off the
+       handshake, though (RFC 7301, section 3.2), which is what turning it
+       off is for. What the server picked, if anything, is in the message
+       the logger gets for the handshake.
+
+       Only for DNS over TLS: DNS over QUIC has `doq` and DNS over HTTPS has
+       `h2` or `http/1.1`, which they cannot do without.
+    */
+   bool alpn = true;
+
    /** With @ref https, the path of the URL that the queries are sent to:
        `/dns-query`, as most servers have it, unless told otherwise. The rest
        of the URL is `https://`, @ref hostname and the port of the server.

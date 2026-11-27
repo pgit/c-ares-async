@@ -215,6 +215,10 @@ std::expected<Config, int> parseConfig(int argc, char* argv[])
    opts("tls-no-verify",
         po::value<bool>()->zero_tokens()->notifier([&config](bool) { config.tls.verify = false; }),
         "accept any certificate (testing only)");
+   opts("no-alpn",
+        po::value<bool>()->zero_tokens()->notifier([&config](bool) { config.tls.alpn = false; }),
+        "do not offer \"dot\" in ALPN with --dot, for a server that does ALPN for other "
+        "protocols only and breaks off the handshake for it");
    opts("file,f", po::value(&config.file),
         "file of URLs to resolve the hosts of, one per line -- the results are listed one line "
         "per host: name, first IPv4 address, first IPv6 address, HTTPS record");
@@ -280,6 +284,15 @@ std::expected<Config, int> parseConfig(int argc, char* argv[])
    if (!vm["doh-path"].defaulted() && !config.tls.https)
    {
       std::cerr << "--doh-path only applies with --doh\n" << desc;
+      return std::unexpected(EXIT_FAILURE);
+   }
+
+   //
+   // DNS over QUIC and DNS over HTTPS have an ALPN of their own, which they cannot do without.
+   //
+   if (!config.tls.alpn && (!config.tls.enabled || config.tls.quic || config.tls.https))
+   {
+      std::cerr << "--no-alpn only applies with --dot\n" << desc;
       return std::unexpected(EXIT_FAILURE);
    }
 
