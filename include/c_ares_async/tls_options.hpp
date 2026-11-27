@@ -40,7 +40,7 @@ struct tls_options
    /** With @ref enabled, sends the queries as HTTPS requests rather than
        over TLS: DNS over HTTPS, each query a POST to @ref path, on TCP port
        443, with the same @ref hostname and @ref verify. HTTP/2, or HTTP/1.1
-       where that is all the server speaks.
+       where that is all the server speaks, or all that @ref http2 allows.
 
        Only where the library is built with it, with anyhttp's HTTP client,
        as for @ref quic. It is the one or the other: a resolver asked for
@@ -83,7 +83,8 @@ struct tls_options
        the logger gets for the handshake.
 
        Only for DNS over TLS: DNS over QUIC has `doq` and DNS over HTTPS has
-       `h2` or `http/1.1`, which they cannot do without.
+       `h2` or `http/1.1`, which they cannot do without -- see @ref http2
+       for which of those.
     */
    bool alpn = true;
 
@@ -92,6 +93,15 @@ struct tls_options
        of the URL is `https://`, @ref hostname and the port of the server.
     */
    std::string path = "/dns-query";
+
+   /** With @ref https, whether ALPN offers `h2` ahead of `http/1.1`, and
+       the session speaks what the server picks of the two. Without it,
+       `http/1.1` is all that is offered, and HTTP/1.1 all that is spoken,
+       with a server that would have HTTP/2 as well: one request at a time,
+       its answer included. That is for a server whose HTTP/2 is not to be
+       relied on, or for seeing what its HTTP/1.1 does.
+    */
+   bool http2 = true;
 };
 
 } // namespace c_ares_async

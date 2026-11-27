@@ -145,12 +145,14 @@ private:
 
       //
       // To the address c-ares has for the server, as HTTP/2 -- or HTTP/1.1, where that is all the
-      // server says it speaks (RFC 8484, section 5.2, recommends HTTP/2 at least).
+      // server says it speaks (RFC 8484, section 5.2, recommends HTTP/2 at least), or all that the
+      // options let ALPN offer.
       //
       self->m_url = make_url(self->options(), self->server_endpoint());
       anyhttp::client::Config config{.url = self->m_url,
                                      .endpoints = {self->server_endpoint()},
-                                     .protocol = anyhttp::Protocol::h2,
+                                     .protocol = self->options().http2 ? anyhttp::Protocol::h2
+                                                                       : anyhttp::Protocol::h1,
                                      .tls_verify = self->options().verify};
       if (const auto& local = self->local_endpoint()) // see doq_bridge
       {

@@ -166,6 +166,24 @@ TEST_P(DnsOverHttps, ResolvesOverHttpsAndNothingElse)
    EXPECT_TRUE(logged(log_level::info, over()));
 }
 
+//
+// Without HTTP/2 in ALPN, a server that has it as well speaks HTTP/1.1 all the same.
+//
+TEST_P(DnsOverHttps, SpeaksHttp11WhereToldTo)
+{
+   auto options = https({}, false);
+   options.http2 = false;
+   make_resolver(options);
+
+   const auto [ec, endpoints] = resolve("www.example.test");
+
+   EXPECT_FALSE(ec) << ec.message();
+   EXPECT_THAT(endpoints, ElementsAre(endpoint("192.0.2.1", 443)));
+   EXPECT_THAT(server.https_requests(), Not(IsEmpty()));
+   EXPECT_TRUE(logged(log_level::info, "over HTTP/1.1"));
+   EXPECT_FALSE(logged(log_level::info, "over HTTP/2"));
+}
+
 TEST_P(DnsOverHttps, PostsEveryQueryAsADnsMessageWithAnIdOfZero)
 {
    make_resolver(https({}, false));
