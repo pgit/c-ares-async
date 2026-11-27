@@ -49,12 +49,12 @@ else()
 endif()
 
 #
-# DNS over QUIC, where the tests are on c_ares_async::doq: the fake server speaks it with anyhttp's
-# server, which comes with anyhttp along with the client, and runs on anyhttp's runtime -- the
-# resolver's loop, on Corosio.
+# DNS over QUIC and DNS over HTTPS, where the tests are on c_ares_async::anyhttp: the fake server
+# speaks them with anyhttp's server, which comes with anyhttp along with the client, and runs on
+# anyhttp's runtime -- the resolver's loop, on Corosio.
 #
-if (TARGET c_ares_async::doq)
-    target_sources(c_ares_async_tests PRIVATE quic_test.cpp)
+if (TARGET c_ares_async::anyhttp)
+    target_sources(c_ares_async_tests PRIVATE doh_test.cpp quic_test.cpp)
 endif()
 
 target_compile_definitions(c_ares_async_tests PRIVATE BOOST_ASIO_NO_DEPRECATED)
@@ -135,7 +135,7 @@ gtest_discover_tests(c_ares_async_tests DISCOVERY_TIMEOUT 60 PROPERTIES TIMEOUT 
 #
 # On Corosio, none of them may bring Asio along, with or without DNS over QUIC: a program that
 # names nothing of Asio is to compile nothing of it. It is the check that anyhttp has for its own
-# public headers on Corosio, which are all that c_ares_async::doq may include of anyhttp's.
+# public headers on Corosio, which are all that c_ares_async::anyhttp may include of anyhttp's.
 #
 get_target_property(c_ares_async_header_set c_ares_async_headers HEADER_SET)
 set(c_ares_async_header_sources)

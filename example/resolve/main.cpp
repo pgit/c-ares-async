@@ -200,7 +200,13 @@ std::expected<Config, int> parseConfig(int argc, char* argv[])
         "only)");
    opts("doq,q", po::bool_switch(&config.tls.quic),
         "use DNS over QUIC (RFC 9250) instead -- on UDP port 853, with --tls-hostname and "
-        "--tls-no-verify as for --dot (c-ares only, and a build with C_ARES_ASYNC_DOQ)");
+        "--tls-no-verify as for --dot (c-ares only, and a build with C_ARES_ASYNC_ANYHTTP)");
+   opts("doh", po::bool_switch(&config.tls.https),
+        "use DNS over HTTPS (RFC 8484) instead -- POSTs on TCP port 443, over HTTP/2, with "
+        "--tls-hostname and --tls-no-verify as for --dot (c-ares only, and a build with "
+        "C_ARES_ASYNC_ANYHTTP)");
+   opts("doh-path", po::value(&config.tls.path)->default_value(config.tls.path),
+        "path of the URL that --doh sends the queries to");
    opts("tls-hostname", po::value(&config.tls.hostname),
         "server name to use for SNI and to verify the certificate against, e.g. "
         "one.one.one.one -- a host name given as --server is used unless told otherwise");
@@ -259,9 +265,24 @@ std::expected<Config, int> parseConfig(int argc, char* argv[])
       return std::unexpected(EXIT_FAILURE);
    }
 
-   // DNS over QUIC is the other encrypted transport, and takes what DNS over TLS does
-   config.tls.enabled = config.tls.enabled || config.tls.quic;
-   const std::string_view transport = config.tls.quic ? "--doq" : "--dot";
+   if (config.tls.quic && config.tls.https)
+   {
+      std::cerr << "--doq and --doh are two ways of asking, choose one\n" << desc;
+      return std::unexpected(EXIT_FAILURE);
+   }
+
+   if (!vm["doh-path"].defaulted() && !config.tls.https)
+   {
+      std::cerr << "--doh-path only applies with --doh\n" << desc;
+      return std::unexpected(EXIT_FAILURE);
+   }
+
+   // DNS over QUIC and DNS over HTTPS are the other encrypted transports, and take what DNS over
+   // TLS does
+   config.tls.enabled = config.tls.enabled || config.tls.quic || config.tls.https;
+   const std::string_view transport = config.tls.quic    ? "--doq"
+                                      : config.tls.https ? "--doh"
+                                                         : "--dot";
 
    if (config.tls.enabled)
    {
@@ -302,7 +323,8 @@ std::expected<Config, int> parseConfig(int argc, char* argv[])
    }
    else if (!config.tls.hostname.empty() || !config.tls.verify)
    {
-      std::cerr << "--tls-hostname and --tls-no-verify only apply with --dot or --doq\n" << desc;
+      std::cerr << "--tls-hostname and --tls-no-verify only apply with --dot, --doq or --doh\n"
+                << desc;
       return std::unexpected(EXIT_FAILURE);
    }
 

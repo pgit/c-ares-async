@@ -33,9 +33,10 @@ spin -- a connected socket is writable nearly always. So ``resolver::on_socket_e
 see the socket once there is a session on it. A handshake that fails leaves the socket poisoned,
 and the next ``SSL_read()`` reports ``ECONNRESET`` so that c-ares fails the server the usual way.
 
-DoH would need HTTP/2 framing and a request/response translation on top, which is a much worse fit
-for a byte-stream hook -- it is not done here. DNS over QUIC is, in the same socket functions, with
-a bridge that says itself when a socket can be read, see :doc:`dns-over-quic`.
+DNS over QUIC and DNS over HTTPS need more than a TLS session under the byte stream: a stream of
+QUIC's for each message, or an HTTP request. They are done in the same socket functions all the
+same, with a bridge to anyhttp that cuts the byte stream into its messages and says itself when a
+socket can be read, see :doc:`dns-over-quic` and :doc:`dns-over-https`.
 
 Whose certificate
 -----------------

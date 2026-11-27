@@ -77,12 +77,14 @@ set(C_ARES_ASYNC_TLS "OpenSSL" CACHE STRING "TLS library to link: OpenSSL or AWS
 set_property(CACHE C_ARES_ASYNC_TLS PROPERTY STRINGS OpenSSL AWS-LC)
 
 #
-# c-ares has no DNS over QUIC either -- see detail/quic_transport.hpp. That one takes a QUIC stack,
-# which is anyhttp's: it is fetched and built as part of this build, on the runtime and TLS library
-# chosen here, and is what c_ares_async::doq adds to the target of that runtime. On Corosio,
-# anyhttp takes OpenSSL only.
+# c-ares has no DNS over QUIC or DNS over HTTPS either -- see detail/anyhttp_transport.hpp. Those
+# take a QUIC stack and an HTTP client, which are anyhttp's: it is fetched and built as part of this
+# build, on the runtime and TLS library chosen here, and is what c_ares_async::anyhttp adds to the
+# target of that runtime. On Corosio, anyhttp takes OpenSSL only.
 #
-option(C_ARES_ASYNC_DOQ "Add DNS over QUIC (RFC 9250), with anyhttp's QUIC: c_ares_async::doq" OFF)
+option(C_ARES_ASYNC_ANYHTTP
+       "Add DNS over QUIC (RFC 9250) and DNS over HTTPS (RFC 8484), with anyhttp: c_ares_async::anyhttp"
+       OFF)
 
 # --------------------------------------------------------------------------------------------------
 #
@@ -110,8 +112,8 @@ elseif (C_ARES_ASYNC_API STREQUAL "COROSIO")
     # are not installed along with the headers -- a consumer of the installed package that uses
     # Corosio brings its own.
     #
-    # The pins are anyhttp's, at the commit pinned below: with C_ARES_ASYNC_DOQ, anyhttp is built
-    # on these two, as they are declared first, and its own declarations of them are not used.
+    # The pins are anyhttp's, at the commit pinned below: with C_ARES_ASYNC_ANYHTTP, anyhttp is
+    # built on these two, as they are declared first, and its own declarations of them are not used.
     #
     if (NOT TARGET Boost::corosio OR NOT TARGET Boost::capy)
         include(FetchContent)
@@ -166,9 +168,11 @@ else()
 endif()
 
 #
-# anyhttp, for its QUIC. Pinned, as Capy and Corosio are: at the merge of
-# https://github.com/pgit/anyhttp/pull/56, with which quic::Config takes a local address and a
-# device to send from. https://github.com/pgit/anyhttp/pull/55 before that has open_stream() wait
+# anyhttp, for its QUIC and its HTTP client. Pinned, as Capy and Corosio are: at the merge of
+# https://github.com/pgit/anyhttp/pull/59, with which client::Config takes a local address and can
+# be told not to verify the certificate, as DNS over HTTPS needs. Before that,
+# https://github.com/pgit/anyhttp/pull/56 has quic::Config take a local address and a device to
+# send from. https://github.com/pgit/anyhttp/pull/55 before that has open_stream() wait
 # for the server to allow another stream, https://github.com/pgit/anyhttp/pull/51 moved its Capy
 # and Corosio to the pins above, and https://github.com/pgit/anyhttp/pull/50 is what DNS over QUIC
 # needs of quic::connect() -- connecting to an address while verifying the certificate for a name
@@ -178,16 +182,16 @@ endif()
 # rules.
 #
 # anyhttp is built for one runtime, and that is the one of this build. Where whoever brought this
-# in has made anyhttp::anyhttp already, it is theirs, and detail/quic_transport.hpp checks that it
+# in has made anyhttp::anyhttp already, it is theirs, and detail/anyhttp_transport.hpp checks that it
 # is built for the runtime of the translation unit.
 #
-if (C_ARES_ASYNC_DOQ)
+if (C_ARES_ASYNC_ANYHTTP)
     #
     # Corosio's openssl_stream, which anyhttp's Corosio build has, uses the zero-copy BIO pair API
     # (BIO_nwrite0), which AWS-LC lacks.
     #
     if (C_ARES_ASYNC_API STREQUAL "COROSIO" AND NOT C_ARES_ASYNC_TLS STREQUAL "OpenSSL")
-        message(FATAL_ERROR "C_ARES_ASYNC_DOQ on Corosio needs C_ARES_ASYNC_TLS=OpenSSL, as "
+        message(FATAL_ERROR "C_ARES_ASYNC_ANYHTTP on Corosio needs C_ARES_ASYNC_TLS=OpenSSL, as "
                             "anyhttp's Corosio build does not take AWS-LC")
     endif()
 
@@ -202,12 +206,12 @@ if (C_ARES_ASYNC_DOQ)
         FetchContent_Declare(
             anyhttp
             GIT_REPOSITORY https://github.com/pgit/anyhttp.git
-            GIT_TAG 132c526c77994447a4d9bf9bc15800e9caa71476
+            GIT_TAG 907817fc8e0566315a1da56ed3df67009b05d201
             EXCLUDE_FROM_ALL)
         FetchContent_MakeAvailable(anyhttp)
     elseif (DEFINED ANYHTTP_API AND NOT ANYHTTP_API STREQUAL C_ARES_ASYNC_API)
         message(FATAL_ERROR "anyhttp::anyhttp is built for ANYHTTP_API=${ANYHTTP_API}, and "
-                            "C_ARES_ASYNC_DOQ needs it for C_ARES_ASYNC_API=${C_ARES_ASYNC_API}")
+                            "C_ARES_ASYNC_ANYHTTP needs it for C_ARES_ASYNC_API=${C_ARES_ASYNC_API}")
     endif()
 endif()
 
@@ -233,16 +237,19 @@ target_sources(
                     include/c_ares_async/corosio/event_loop.hpp
                     include/c_ares_async/corosio/formatter.hpp
                     include/c_ares_async/corosio/runtime.hpp
+                    include/c_ares_async/detail/anyhttp_bridge.hpp
+                    include/c_ares_async/detail/anyhttp_transport.hpp
+                    include/c_ares_async/detail/doh_bridge.hpp
+                    include/c_ares_async/detail/doq_bridge.hpp
                     include/c_ares_async/detail/event_loop.hpp
                     include/c_ares_async/detail/log.hpp
-                    include/c_ares_async/detail/quic_transport.hpp
                     include/c_ares_async/detail/server_list.hpp
                     include/c_ares_async/detail/socket_functions.hpp
                     include/c_ares_async/detail/tls_transport.hpp
                     include/c_ares_async/error.hpp
                     include/c_ares_async/https_record.hpp
+                    include/c_ares_async/impl/anyhttp_transport.ipp
                     include/c_ares_async/impl/error.ipp
-                    include/c_ares_async/impl/quic_transport.ipp
                     include/c_ares_async/impl/resolver.ipp
                     include/c_ares_async/impl/server_list.ipp
                     include/c_ares_async/impl/socket_functions.ipp
@@ -279,31 +286,31 @@ endif()
 string(TOLOWER ${C_ARES_ASYNC_API} c_ares_async_runtime)
 
 #
-# DNS over QUIC, on top of the target of this build's runtime -- c_ares_async::asio or
+# DNS over QUIC and DNS over HTTPS, on top of the target of this build's runtime -- c_ares_async::asio or
 # c_ares_async::corosio, which is what anyhttp is built for: anyhttp, and the macro that has the
 # headers use it. Every translation unit of a program that makes a resolver of that runtime has to
 # agree on that macro, so a program that uses this target uses it everywhere instead of the
 # runtime's. It is not installed: anyhttp is built as part of this build, and only for it.
 #
-if (C_ARES_ASYNC_DOQ AND TARGET c_ares_async_${c_ares_async_runtime})
-    add_library(c_ares_async_doq INTERFACE)
-    add_library(c_ares_async::doq ALIAS c_ares_async_doq)
-    target_link_libraries(c_ares_async_doq INTERFACE c_ares_async_${c_ares_async_runtime}
-                                                     anyhttp::anyhttp)
-    target_compile_definitions(c_ares_async_doq INTERFACE C_ARES_ASYNC_DOQ=1)
+if (C_ARES_ASYNC_ANYHTTP AND TARGET c_ares_async_${c_ares_async_runtime})
+    add_library(c_ares_async_anyhttp INTERFACE)
+    add_library(c_ares_async::anyhttp ALIAS c_ares_async_anyhttp)
+    target_link_libraries(c_ares_async_anyhttp INTERFACE c_ares_async_${c_ares_async_runtime}
+                                                         anyhttp::anyhttp)
+    target_compile_definitions(c_ares_async_anyhttp INTERFACE C_ARES_ASYNC_ANYHTTP=1)
 endif()
 
 #
-# And the target they link for it: the runtime's own, or c_ares_async::doq, which is the same with
-# DNS over QUIC added, where this build has it.
+# And the target they link for it: the runtime's own, or c_ares_async::anyhttp, which is the same
+# with DNS over QUIC and DNS over HTTPS added, where this build has it.
 #
-if (TARGET c_ares_async::doq)
-    set(c_ares_async_target c_ares_async::doq)
+if (TARGET c_ares_async::anyhttp)
+    set(c_ares_async_target c_ares_async::anyhttp)
 else()
     set(c_ares_async_target c_ares_async::${c_ares_async_runtime})
 endif()
 
-foreach (runtime IN ITEMS asio corosio doq)
+foreach (runtime IN ITEMS asio corosio anyhttp)
     if (TARGET c_ares_async::${runtime})
         message(STATUS "c_ares_async: c_ares_async::${runtime} is there")
     endif()

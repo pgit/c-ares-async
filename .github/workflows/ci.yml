@@ -39,7 +39,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        preset: [dev, release, asan, tsan, openssl, doq, doq-corosio, gcc, corosio, corosio-asan]
+        preset: [dev, release, asan, tsan, openssl, anyhttp, anyhttp-corosio, gcc, corosio, corosio-asan]
 
     steps:
       - uses: actions/checkout@v7

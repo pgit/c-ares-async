@@ -17,9 +17,11 @@
 #include <boost/asio/use_awaitable.hpp>
 #include <boost/asio/write.hpp>
 
-#if C_ARES_ASYNC_DOQ
+#if C_ARES_ASYNC_ANYHTTP
 #include <anyhttp/quic.hpp>
 #include <anyhttp/server.hpp>
+
+#include <boost/http/field.hpp>
 
 #include <spdlog/spdlog.h>
 
@@ -35,9 +37,13 @@
 #include <cctype>
 #include <cstring>
 #include <map>
+#include <memory>
 #include <optional>
 #include <span>
 #include <stdexcept>
+#include <string_view>
+#include <tuple>
+#include <utility>
 
 using namespace boost::asio;
 using boost::system::error_code;
@@ -87,7 +93,7 @@ using record_ptr = std::unique_ptr<ares_dns_record_t, decltype(&ares_dns_record_
 
 // --------------------------------------------------------------------------------------------------
 
-struct fake_dns_server::state
+struct fake_dns_server::state : std::enable_shared_from_this<fake_dns_server::state>
 {
    explicit state(const any_io_executor& executor) : udp(executor), acceptor(executor) {}
 
@@ -107,7 +113,7 @@ struct fake_dns_server::state
    static awaitable<void> serve_stream(std::shared_ptr<state> self, Stream& stream, transport via,
                                        std::string from);
 
-#if C_ARES_ASYNC_DOQ
+#if C_ARES_ASYNC_ANYHTTP
    //
    // On anyhttp's runtime, which is not Asio's in a COROSIO build.
    //
@@ -122,6 +128,21 @@ struct fake_dns_server::state
    std::vector<anyhttp::quic::Stream> quic_held; // the streams that set_quic_hold() keeps waiting
    std::size_t quic_connections = 0;
    std::vector<unsigned> quic_ids;
+
+   static anyhttp::Task<void> serve_https(std::shared_ptr<state> self,
+                                          anyhttp::server::Request request,
+                                          anyhttp::server::Response response);
+   void listen_https(const anyhttp::Executor& executor, std::uint16_t port);
+
+   std::optional<anyhttp::server::Server> https;
+   test_certificate https_certificate; // for listening again
+   std::string https_path;
+   std::uint64_t https_max_streams = 100;
+   unsigned https_status = 0; // that every request is answered with, where not 0
+   std::string https_content_type = "application/dns-message";
+   bool https_hold = false;
+   std::vector<std::pair<anyhttp::server::Request, anyhttp::server::Response>> https_held;
+   std::vector<https_request> https_requests;
 #endif
 
    ip::udp::socket udp;
@@ -297,13 +318,15 @@ fake_dns_server::~fake_dns_server()
    error_code ignored;
    m_state->udp.close(ignored);
    m_state->acceptor.close(ignored);
-#if C_ARES_ASYNC_DOQ
+#if C_ARES_ASYNC_ANYHTTP
    m_state->quic_held.clear();
    m_state->quic.reset(); // stops listening, and ends every connection
+   m_state->https_held.clear();
+   m_state->https.reset();
 #endif
 }
 
-#if C_ARES_ASYNC_DOQ
+#if C_ARES_ASYNC_ANYHTTP
 void fake_dns_server::shutdown()
 {
    error_code ignored;
@@ -311,6 +334,8 @@ void fake_dns_server::shutdown()
    m_state->acceptor.close(ignored);
    m_state->quic_held.clear();
    m_state->quic.reset();
+   m_state->https_held.clear();
+   m_state->https.reset();
 }
 #endif
 
@@ -461,7 +486,7 @@ awaitable<void> fake_dns_server::state::serve_tcp(std::shared_ptr<state> self)
 
 // --------------------------------------------------------------------------------------------------
 
-#if C_ARES_ASYNC_DOQ
+#if C_ARES_ASYNC_ANYHTTP
 
 void fake_dns_server::use_quic(const anyhttp::Executor& executor,
                                const test_certificate& certificate,
@@ -576,4 +601,144 @@ anyhttp::Task<void> fake_dns_server::state::serve_quic_stream(std::shared_ptr<st
    std::ignore = co_await stream.write_eof(anyhttp::make_buffer(framed));
 }
 
-#endif // C_ARES_ASYNC_DOQ
+// --------------------------------------------------------------------------------------------------
+
+void fake_dns_server::use_https(const anyhttp::Executor& executor,
+                                const test_certificate& certificate, std::string path,
+                                std::uint64_t max_streams)
+{
+   spdlog::set_level(spdlog::level::warn); // see use_quic()
+
+   m_state->https_certificate = certificate;
+   m_state->https_path = std::move(path);
+   m_state->https_max_streams = max_streams;
+   m_state->listen_https(executor, 0);
+}
+
+//
+// anyhttp's server reads its certificate from files, once, when it is made -- and it listens on
+// UDP for HTTP/3 as well, which nothing here asks for.
+//
+void fake_dns_server::state::listen_https(const anyhttp::Executor& executor, std::uint16_t port)
+{
+   const auto base = testing::TempDir() + "c_ares_async_doh_" + std::to_string(::getpid());
+   const auto chain = base + "_chain.pem", key = base + "_key.pem";
+   std::ofstream(chain) << https_certificate.certificate_pem;
+   std::ofstream(key) << https_certificate.key_pem;
+
+   //
+   // With SO_REUSEPORT, as the server that goes here closes its sockets on the executor, after
+   // this one is listening on the same port already.
+   //
+   https.reset();
+   https.emplace(executor, anyhttp::server::Config{.listen_address = "127.0.0.1",
+                                                   .port = port,
+                                                   .reuse_port = true,
+                                                   .tls_certificate_chain = chain,
+                                                   .tls_private_key = key,
+                                                   .max_concurrent_streams = https_max_streams});
+   std::remove(chain.c_str());
+   std::remove(key.c_str());
+
+   //
+   // The server keeps the handler, so the handler must not keep the state, which has the server.
+   //
+   https->on_request(
+      [weak = weak_from_this()](anyhttp::server::Request request,
+                                anyhttp::server::Response response) -> anyhttp::Task<void> {
+         if (auto self = weak.lock())
+            co_await serve_https(std::move(self), std::move(request), std::move(response));
+      });
+}
+
+std::string fake_dns_server::https_address() const
+{
+   return "127.0.0.1:" + std::to_string(m_state->https->local_endpoint().port());
+}
+
+void fake_dns_server::restart_https()
+{
+   const auto executor = m_state->https->get_executor();
+   const auto port = m_state->https->local_endpoint().port();
+   m_state->https_held.clear();
+   m_state->listen_https(executor, port);
+}
+
+void fake_dns_server::set_https_status(unsigned status) { m_state->https_status = status; }
+
+void fake_dns_server::set_https_content_type(std::string type)
+{
+   m_state->https_content_type = std::move(type);
+}
+
+void fake_dns_server::set_https_hold(bool hold) { m_state->https_hold = hold; }
+
+const std::vector<fake_dns_server::https_request>& fake_dns_server::https_requests() const
+{
+   return m_state->https_requests;
+}
+
+//
+// RFC 8484, section 4.1: a POST to the path, with the query as its body, and the answer as the
+// body of the response.
+//
+anyhttp::Task<void> fake_dns_server::state::serve_https(std::shared_ptr<state> self,
+                                                        anyhttp::server::Request request,
+                                                        anyhttp::server::Response response)
+{
+   std::vector<unsigned char> query;
+   std::array<unsigned char, 4096> buffer;
+   for (;;)
+   {
+      auto [ec, n] = co_await request.read_some(anyhttp::make_buffer(buffer));
+      query.insert(query.end(), buffer.begin(), buffer.begin() + n);
+      if (ec == anyhttp::errors::eof)
+         break;
+      if (ec)
+         co_return;
+   }
+
+   self->https_requests.push_back(
+      {.method = std::string(request.method()),
+       .path = std::string(request.url().path()),
+       .content_type = std::string(request.fields().value_or(boost::http::field::content_type, "")),
+       .accept = std::string(request.fields().value_or(boost::http::field::accept, "")),
+       .id = query.size() >= 2 ? (unsigned{query[0]} << 8) | query[1] : 0});
+
+   auto respond = [&](unsigned status, std::string_view type,
+                      const std::vector<unsigned char>& body) -> anyhttp::Task<void> {
+      anyhttp::Fields fields;
+      if (!type.empty())
+         fields.set(boost::http::field::content_type, type);
+      fields.set(boost::http::field::content_length, std::to_string(body.size()));
+      if (auto [ec] = co_await response.submit(status, std::move(fields)); ec)
+         co_return;
+      std::ignore = co_await response.write_eof(anyhttp::make_buffer(body));
+   };
+
+   if (self->https_status != 0)
+   {
+      co_await respond(self->https_status, {}, {});
+      co_return;
+   }
+
+   if (request.method() != "POST" || request.url().path() != self->https_path)
+   {
+      co_await respond(404, {}, {});
+      co_return;
+   }
+
+   if (self->https_hold)
+   {
+      self->https_held.emplace_back(std::move(request), std::move(response));
+      co_return;
+   }
+
+   const auto reply = self->answer(query, transport::https, {});
+   if (reply.empty())
+      co_return; // silent: no answer, and the stream reset
+
+   co_await respond(200, self->https_content_type, reply);
+}
+
+#endif // C_ARES_ASYNC_ANYHTTP

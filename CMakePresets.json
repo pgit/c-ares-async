@@ -86,29 +86,29 @@
             }
         },
         {
-            "name": "doq",
-            "displayName": "DNS over QUIC",
-            "description": "A debug build against AWS-LC with DNS over QUIC, in build-doq/: anyhttp is fetched at the commit CMakeLists.txt pins, and built for its QUIC",
+            "name": "anyhttp",
+            "displayName": "DNS over QUIC and HTTPS",
+            "description": "A debug build against AWS-LC with DNS over QUIC and DNS over HTTPS, in build-anyhttp/: anyhttp is fetched at the commit CMakeLists.txt pins, and built for its QUIC and its HTTP client",
             "inherits": [
                 "devcontainer",
                 "aws-lc"
             ],
-            "binaryDir": "${sourceDir}/build-doq",
+            "binaryDir": "${sourceDir}/build-anyhttp",
             "cacheVariables": {
                 "CMAKE_BUILD_TYPE": "Debug",
-                "C_ARES_ASYNC_DOQ": "ON"
+                "C_ARES_ASYNC_ANYHTTP": "ON"
             }
         },
         {
-            "name": "doq-corosio",
-            "displayName": "DNS over QUIC on Corosio",
-            "description": "DNS over QUIC with the tests and examples on Corosio, in build-doq-corosio/: anyhttp is built for Corosio, on Capy and Corosio at the commits CMakeLists.txt pins, and against the system's OpenSSL, as anyhttp does not take AWS-LC on Corosio",
+            "name": "anyhttp-corosio",
+            "displayName": "DNS over QUIC and HTTPS on Corosio",
+            "description": "DNS over QUIC and DNS over HTTPS with the tests and examples on Corosio, in build-anyhttp-corosio/: anyhttp is built for Corosio, on Capy and Corosio at the commits CMakeLists.txt pins, and against the system's OpenSSL, as anyhttp does not take AWS-LC on Corosio",
             "inherits": "devcontainer",
-            "binaryDir": "${sourceDir}/build-doq-corosio",
+            "binaryDir": "${sourceDir}/build-anyhttp-corosio",
             "cacheVariables": {
                 "CMAKE_BUILD_TYPE": "Debug",
                 "C_ARES_ASYNC_API": "COROSIO",
-                "C_ARES_ASYNC_DOQ": "ON",
+                "C_ARES_ASYNC_ANYHTTP": "ON",
                 "C_ARES_ASYNC_TLS": "OpenSSL"
             }
         },
@@ -183,12 +183,12 @@
             "configurePreset": "tsan"
         },
         {
-            "name": "doq",
-            "configurePreset": "doq"
+            "name": "anyhttp",
+            "configurePreset": "anyhttp"
         },
         {
-            "name": "doq-corosio",
-            "configurePreset": "doq-corosio"
+            "name": "anyhttp-corosio",
+            "configurePreset": "anyhttp-corosio"
         },
         {
             "name": "openssl",
@@ -236,13 +236,13 @@
             "inherits": "base"
         },
         {
-            "name": "doq",
-            "configurePreset": "doq",
+            "name": "anyhttp",
+            "configurePreset": "anyhttp",
             "inherits": "base"
         },
         {
-            "name": "doq-corosio",
-            "configurePreset": "doq-corosio",
+            "name": "anyhttp-corosio",
+            "configurePreset": "anyhttp-corosio",
             "inherits": "base"
         },
         {

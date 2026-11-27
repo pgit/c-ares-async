@@ -2,8 +2,8 @@
 // SPDX-License-Identifier: BSL-1.0
 
 //
-// How a resolver uses DNS over TLS. It is the same on either runtime, so it is in the namespace
-// itself rather than in the inline one of a runtime.
+// How a resolver uses DNS over TLS, QUIC or HTTPS. It is the same on either runtime, so it is in
+// the namespace itself rather than in the inline one of a runtime.
 //
 #pragma once
 
@@ -12,14 +12,15 @@
 namespace c_ares_async
 {
 
-/** Whether a @ref resolver uses DNS over TLS (RFC 7858) or DNS over QUIC
-    (RFC 9250), and how.
+/** Whether a @ref resolver uses DNS over TLS (RFC 7858), DNS over QUIC
+    (RFC 9250) or DNS over HTTPS (RFC 8484), and how.
 
     c-ares has no encrypted transport of its own. What the library does is
     to put a TLS session under the TCP connections that c-ares opens, which
     is all it takes to turn DNS over TCP into DNS over TLS -- or to have a
     QUIC connection answer for them, one stream per query, which makes it
-    DNS over QUIC.
+    DNS over QUIC, or an HTTP/2 session, one request per query, which makes
+    it DNS over HTTPS.
  */
 struct tls_options
 {
@@ -31,10 +32,21 @@ struct tls_options
        @ref verify.
 
        Only where the library is built with it, with anyhttp's QUIC: the
-       target `c_ares_async::doq`, which defines `C_ARES_ASYNC_DOQ`. Without
-       that, a resolver asked for it cannot be made.
+       target `c_ares_async::anyhttp`, which defines `C_ARES_ASYNC_ANYHTTP`.
+       Without that, a resolver asked for it cannot be made.
     */
    bool quic = false;
+
+   /** With @ref enabled, sends the queries as HTTPS requests rather than
+       over TLS: DNS over HTTPS, each query a POST to @ref path, on TCP port
+       443, with the same @ref hostname and @ref verify. HTTP/2, or HTTP/1.1
+       where that is all the server speaks.
+
+       Only where the library is built with it, with anyhttp's HTTP client,
+       as for @ref quic. It is the one or the other: a resolver asked for
+       both cannot be made.
+    */
+   bool https = false;
 
    /** The name of the server, for SNI and for its certificate to be checked
        against.
@@ -43,6 +55,11 @@ struct tls_options
        to come from here. Without one there is no SNI, and @ref verify still
        checks that the certificate is one to trust but not whose it is --
        which is no more than knowing that the server is somebody.
+
+       With @ref https, it is also the host of the URL that the queries go
+       to, and the server's address is where there is none: the certificate
+       is then checked against that address, which takes a certificate that
+       is issued for it.
     */
    std::string hostname;
 
@@ -53,6 +70,12 @@ struct tls_options
        a position to answer for the server. That is for testing.
     */
    bool verify = true;
+
+   /** With @ref https, the path of the URL that the queries are sent to:
+       `/dns-query`, as most servers have it, unless told otherwise. The rest
+       of the URL is `https://`, @ref hostname and the port of the server.
+    */
+   std::string path = "/dns-query";
 };
 
 } // namespace c_ares_async

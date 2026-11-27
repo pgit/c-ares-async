@@ -318,7 +318,7 @@ TEST_F(DnsOverTls, FailsWhereTheLocalAddressIsNotOneOfTheHosts)
    EXPECT_EQ(server.connections(), 0u);
 }
 
-#if !C_ARES_ASYNC_DOQ
+#if !C_ARES_ASYNC_ANYHTTP
 TEST_F(DnsOverTls, RefusesDnsOverQuicWhereItIsNotBuiltIn)
 {
    //
@@ -328,6 +328,19 @@ TEST_F(DnsOverTls, RefusesDnsOverQuicWhereItIsNotBuiltIn)
    {
       c_ares_async::resolver quic(executor(), {.enabled = true, .quic = true});
       ADD_FAILURE() << "a resolver for DNS over QUIC without it";
+   }
+   catch (const c_ares_async::system_error& error)
+   {
+      EXPECT_EQ(error.code(), c_ares_async::errc::operation_not_supported) << error.what();
+   }
+}
+
+TEST_F(DnsOverTls, RefusesDnsOverHttpsWhereItIsNotBuiltIn)
+{
+   try
+   {
+      c_ares_async::resolver https(executor(), {.enabled = true, .https = true});
+      ADD_FAILURE() << "a resolver for DNS over HTTPS without it";
    }
    catch (const c_ares_async::system_error& error)
    {
