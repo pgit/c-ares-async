@@ -7,6 +7,8 @@
 //
 #include "resolver_fixture.hpp"
 
+#include <anyhttp/common.hpp>
+
 #include <algorithm>
 #include <chrono>
 #include <cstdint>
@@ -54,7 +56,13 @@ tls_options https(std::string hostname, bool verify, std::string path = "/dns-qu
 
 } // namespace
 
-class DnsOverHttps : public event_loop_fixture
+//
+// Every test runs against a server that speaks HTTP/2 and HTTP/1.1, which the bridge takes HTTP/2
+// of, and against one that speaks HTTP/1.1 only, which it falls back to: the parameter is the most
+// the server speaks.
+//
+class DnsOverHttps : public event_loop_fixture,
+                     public testing::WithParamInterface<anyhttp::Protocol>
 {
 protected:
    void SetUp() override
@@ -62,7 +70,7 @@ protected:
       //
       // On the resolver's executor, which is anyhttp's runtime, as for DNS over QUIC.
       //
-      server.use_https(executor(), certificate, server_path(), max_streams());
+      server.use_https(executor(), certificate, server_path(), max_streams(), GetParam());
       server.add_address("www.example.test", "192.0.2.1");
       server.add_https("www.example.test", 1, ".", {{ARES_SVCB_PARAM_ALPN, {2, 'h', '3'}}});
       server.add_address("mail.example.test", "192.0.2.2");
@@ -123,6 +131,14 @@ protected:
       return logged_count(level, text) > 0;
    }
 
+   //
+   // How the session is logged once it is there.
+   //
+   std::string_view over() const
+   {
+      return GetParam() == anyhttp::Protocol::h2 ? "over HTTP/2" : "over HTTP/1.1";
+   }
+
    static inline const test_certificate certificate = make_test_certificate(server_name);
 
    fake_dns_server server{server_executor()};
@@ -133,7 +149,7 @@ protected:
 
 // --------------------------------------------------------------------------------------------------
 
-TEST_F(DnsOverHttps, ResolvesOverHttpsAndNothingElse)
+TEST_P(DnsOverHttps, ResolvesOverHttpsAndNothingElse)
 {
    make_resolver(https({}, false));
 
@@ -147,10 +163,10 @@ TEST_F(DnsOverHttps, ResolvesOverHttpsAndNothingElse)
    EXPECT_EQ(server.count(transport::tcp), 0u);
    EXPECT_EQ(server.count(transport::tls), 0u);
    EXPECT_EQ(server.count(transport::quic), 0u);
-   EXPECT_TRUE(logged(log_level::info, "over HTTP/2"));
+   EXPECT_TRUE(logged(log_level::info, over()));
 }
 
-TEST_F(DnsOverHttps, PostsEveryQueryAsADnsMessageWithAnIdOfZero)
+TEST_P(DnsOverHttps, PostsEveryQueryAsADnsMessageWithAnIdOfZero)
 {
    make_resolver(https({}, false));
 
@@ -170,7 +186,7 @@ TEST_F(DnsOverHttps, PostsEveryQueryAsADnsMessageWithAnIdOfZero)
                  Field(&https_request::id, 0u))));
 }
 
-TEST_F(DnsOverHttps, VerifiesTheCertificateAgainstTheName)
+TEST_P(DnsOverHttps, VerifiesTheCertificateAgainstTheName)
 {
    trust_the_server();
    make_resolver(https(server_name, true));
@@ -182,7 +198,7 @@ TEST_F(DnsOverHttps, VerifiesTheCertificateAgainstTheName)
    EXPECT_TRUE(logged(log_level::info, std::string("verified for '") + server_name + "'"));
 }
 
-TEST_F(DnsOverHttps, RejectsACertificateForAnotherName)
+TEST_P(DnsOverHttps, RejectsACertificateForAnotherName)
 {
    trust_the_server();
    make_resolver(https("other.example.test", true));
@@ -196,7 +212,7 @@ TEST_F(DnsOverHttps, RejectsACertificateForAnotherName)
    EXPECT_TRUE(logged(log_level::error, "DoH connection to 127.0.0.1:"));
 }
 
-TEST_F(DnsOverHttps, RejectsACertificateNobodyVouchesFor)
+TEST_P(DnsOverHttps, RejectsACertificateNobodyVouchesFor)
 {
    make_resolver(https(server_name, true));
 
@@ -207,7 +223,7 @@ TEST_F(DnsOverHttps, RejectsACertificateNobodyVouchesFor)
    EXPECT_THAT(server.https_requests(), IsEmpty());
 }
 
-TEST_F(DnsOverHttps, TakesAnyCertificateWhenToldNotToVerify)
+TEST_P(DnsOverHttps, TakesAnyCertificateWhenToldNotToVerify)
 {
    make_resolver(https("other.example.test", false));
 
@@ -223,7 +239,7 @@ TEST_F(DnsOverHttps, TakesAnyCertificateWhenToldNotToVerify)
 // URL has a host, which is the server's address then, and the certificate has to be for that.
 // The one here is for the name only.
 //
-TEST_F(DnsOverHttps, VerifiesTheCertificateAgainstTheAddressWhereThereIsNoName)
+TEST_P(DnsOverHttps, VerifiesTheCertificateAgainstTheAddressWhereThereIsNoName)
 {
    trust_the_server();
    make_resolver(https({}, true));
@@ -235,7 +251,7 @@ TEST_F(DnsOverHttps, VerifiesTheCertificateAgainstTheAddressWhereThereIsNoName)
    EXPECT_THAT(server.https_requests(), IsEmpty());
 }
 
-TEST_F(DnsOverHttps, KeepsTheConnectionForTheNextQuestion)
+TEST_P(DnsOverHttps, KeepsTheConnectionForTheNextQuestion)
 {
    make_resolver(https({}, false));
 
@@ -249,7 +265,7 @@ TEST_F(DnsOverHttps, KeepsTheConnectionForTheNextQuestion)
       << "a handshake per name is what this is there to avoid";
 }
 
-TEST_F(DnsOverHttps, SendsAddressAndHttpsQueriesDownOneConnection)
+TEST_P(DnsOverHttps, SendsAddressAndHttpsQueriesDownOneConnection)
 {
    make_resolver(https({}, false));
 
@@ -279,7 +295,7 @@ TEST_F(DnsOverHttps, SendsAddressAndHttpsQueriesDownOneConnection)
    EXPECT_GE(server.https_requests().size(), 3u) << "A, AAAA and HTTPS, each a request of its own";
 }
 
-TEST_F(DnsOverHttps, ReportsAServerThatIsNotThere)
+TEST_P(DnsOverHttps, ReportsAServerThatIsNotThere)
 {
    make_resolver(https({}, false));
 
@@ -305,7 +321,7 @@ TEST_F(DnsOverHttps, ReportsAServerThatIsNotThere)
 // address the host has works, and one that it does not have fails the connection. anyhttp's own
 // tests see the TCP connection come from the address.
 //
-TEST_F(DnsOverHttps, SendsFromTheLocalAddress)
+TEST_P(DnsOverHttps, SendsFromTheLocalAddress)
 {
    make_resolver(https({}, false));
    resolver->set_local_address(ip_address("127.0.0.3"));
@@ -317,7 +333,7 @@ TEST_F(DnsOverHttps, SendsFromTheLocalAddress)
    EXPECT_THAT(server.https_requests(), Not(IsEmpty()));
 }
 
-TEST_F(DnsOverHttps, KeepsTheLocalAddressToItsFamily)
+TEST_P(DnsOverHttps, KeepsTheLocalAddressToItsFamily)
 {
    make_resolver(https({}, false));
    resolver->set_local_address(ip_address("2001:db8::1"));
@@ -328,7 +344,7 @@ TEST_F(DnsOverHttps, KeepsTheLocalAddressToItsFamily)
    EXPECT_THAT(server.https_requests(), Not(IsEmpty()));
 }
 
-TEST_F(DnsOverHttps, FailsWhereTheLocalAddressIsNotOneOfTheHosts)
+TEST_P(DnsOverHttps, FailsWhereTheLocalAddressIsNotOneOfTheHosts)
 {
    make_resolver(https({}, false));
    resolver->set_local_address(ip_address("192.0.2.9"));
@@ -345,7 +361,7 @@ TEST_F(DnsOverHttps, FailsWhereTheLocalAddressIsNotOneOfTheHosts)
 // A status that is not 2xx, and an answer that is no DNS message, are the end of the connection
 // for c-ares, which fails the server then -- rather than waiting for every query to time out.
 //
-TEST_F(DnsOverHttps, GivesUpOnAServerThatAnswersWithAnError)
+TEST_P(DnsOverHttps, GivesUpOnAServerThatAnswersWithAnError)
 {
    server.set_https_status(503);
    make_resolver(https({}, false));
@@ -358,7 +374,7 @@ TEST_F(DnsOverHttps, GivesUpOnAServerThatAnswersWithAnError)
    EXPECT_FALSE(logged(log_level::debug, "query timeout"));
 }
 
-TEST_F(DnsOverHttps, GivesUpOnAnAnswerThatIsNoDnsMessage)
+TEST_P(DnsOverHttps, GivesUpOnAnAnswerThatIsNoDnsMessage)
 {
    server.set_https_content_type("text/html");
    make_resolver(https({}, false));
@@ -370,7 +386,7 @@ TEST_F(DnsOverHttps, GivesUpOnAnAnswerThatIsNoDnsMessage)
    EXPECT_TRUE(logged(log_level::error, "a body of type 'text/html'"));
 }
 
-TEST_F(DnsOverHttps, TakesTheTypeOfAnAnswerWhateverItsCase)
+TEST_P(DnsOverHttps, TakesTheTypeOfAnAnswerWhateverItsCase)
 {
    server.set_https_content_type("Application/DNS-Message; charset=binary");
    make_resolver(https({}, false));
@@ -386,7 +402,7 @@ TEST_F(DnsOverHttps, TakesTheTypeOfAnAnswerWhateverItsCase)
 // that ended with it from the next query, which the session cannot take: it reconnects, and asks
 // again.
 //
-TEST_F(DnsOverHttps, ConnectsAgainOnceTheServerHasGoneAway)
+TEST_P(DnsOverHttps, ConnectsAgainOnceTheServerHasGoneAway)
 {
    make_resolver(https({}, false));
 
@@ -406,7 +422,7 @@ TEST_F(DnsOverHttps, ConnectsAgainOnceTheServerHasGoneAway)
    EXPECT_TRUE(logged(log_level::debug, "connection over"));
 }
 
-TEST_F(DnsOverHttps, LetsGoOfAQueryInFlightWhenDestroyed)
+TEST_P(DnsOverHttps, LetsGoOfAQueryInFlightWhenDestroyed)
 {
    server.set_https_hold(true);
    make_resolver(https({}, false));
@@ -428,7 +444,7 @@ TEST_F(DnsOverHttps, LetsGoOfAQueryInFlightWhenDestroyed)
    std::ignore = run_until([] { return false; }, std::chrono::milliseconds(100));
 }
 
-TEST_F(DnsOverHttps, LetsGoOfAConnectionBeingMadeWhenDestroyed)
+TEST_P(DnsOverHttps, LetsGoOfAConnectionBeingMadeWhenDestroyed)
 {
    make_resolver(https({}, false));
 
@@ -454,12 +470,55 @@ TEST_F(DnsOverHttps, LetsGoOfAConnectionBeingMadeWhenDestroyed)
    std::ignore = run_until([] { return false; }, std::chrono::milliseconds(100));
 }
 
+TEST_P(DnsOverHttps, CannotBeAskedForQuicAsWell)
+{
+   auto options = https({}, false);
+   options.quic = true;
+
+   try
+   {
+      c_ares_async::resolver both(executor(), options);
+      FAIL() << "a resolver for DNS over QUIC and DNS over HTTPS at once";
+   }
+   catch (const c_ares_async::system_error& error)
+   {
+      EXPECT_EQ(error.code(), c_ares_async::errc::invalid_argument) << error.what();
+   }
+}
+
+//
+// HTTP2 and HTTP11, after what the server speaks at most.
+//
+const auto protocols = testing::Values(anyhttp::Protocol::h2, anyhttp::Protocol::h1);
+const auto http2 = testing::Values(anyhttp::Protocol::h2);
+const auto http11 = testing::Values(anyhttp::Protocol::h1);
+
+std::string protocol_name(const testing::TestParamInfo<anyhttp::Protocol>& info)
+{
+   return anyhttp::to_string(info.param);
+}
+
+INSTANTIATE_TEST_SUITE_P(, DnsOverHttps, protocols, protocol_name);
+
+// --------------------------------------------------------------------------------------------------
+
+//
+// What HTTP/2 has and HTTP/1.1 does not: streams that end on a session that goes on, and a limit
+// on how many of them there are at once.
+//
+class DnsOverHttp2 : public DnsOverHttps
+{
+};
+
+INSTANTIATE_TEST_SUITE_P(, DnsOverHttp2, http2, protocol_name);
+
 //
 // A stream that the server resets, before there is a response, has its query sent again -- once.
 // That is for a server that refuses a stream over the limit it has not told the session about
-// yet, see DnsOverHttpsOneStream; a server that resets them all does not get asked for ever.
+// yet, see DnsOverHttpsOneStream; over HTTP/1.1, the server ends the connection instead; a server
+// that resets them all does not get asked for ever.
 //
-TEST_F(DnsOverHttps, AsksAgainOnceWhereTheServerResetsTheStream)
+TEST_P(DnsOverHttp2, AsksAgainOnceWhereTheServerResetsTheStream)
 {
    server.set_silent(true); // which resets the stream, with no response on it
 
@@ -477,20 +536,36 @@ TEST_F(DnsOverHttps, AsksAgainOnceWhereTheServerResetsTheStream)
    EXPECT_TRUE(logged(log_level::debug, "sending the query again"));
 }
 
-TEST_F(DnsOverHttps, CannotBeAskedForQuicAsWell)
-{
-   auto options = https({}, false);
-   options.quic = true;
+// --------------------------------------------------------------------------------------------------
 
-   try
-   {
-      c_ares_async::resolver both(executor(), options);
-      FAIL() << "a resolver for DNS over QUIC and DNS over HTTPS at once";
-   }
-   catch (const c_ares_async::system_error& error)
-   {
-      EXPECT_EQ(error.code(), c_ares_async::errc::invalid_argument) << error.what();
-   }
+//
+// Over HTTP/1.1, the session has one request at a time, its answer included: the next query waits
+// in the bridge until then, and does not get to the server.
+//
+class DnsOverHttp11 : public DnsOverHttps
+{
+};
+
+INSTANTIATE_TEST_SUITE_P(, DnsOverHttp11, http11, protocol_name);
+
+TEST_P(DnsOverHttp11, AsksOneQueryAtATime)
+{
+   server.set_https_hold(true);
+   make_resolver(https({}, false));
+
+   std::optional<std::tuple<error_code, c_ares_async::resolver::results_type>> result;
+   start([](c_ares_async::resolver& resolver, auto& result) -> c_ares_async::Task<void> {
+      result = co_await resolver.resolve("www.example.test", "443"); // A and AAAA
+   }(*resolver, result));
+
+   ASSERT_TRUE(run_until([&] { return !server.https_requests().empty(); }));
+   std::ignore = run_until([] { return false; }, std::chrono::milliseconds(100));
+   EXPECT_EQ(server.https_requests().size(), 1u);
+   EXPECT_TRUE(logged(log_level::info, "over HTTP/1.1"));
+
+   resolver.reset();
+   ASSERT_TRUE(run_until([&] { return result.has_value(); }));
+   EXPECT_EQ(std::get<0>(*result), c_ares_async::errors::canceled);
 }
 
 // --------------------------------------------------------------------------------------------------
@@ -501,7 +576,9 @@ protected:
    std::string server_path() const override { return "/resolve"; }
 };
 
-TEST_F(DnsOverHttpsElsewhere, AsksAtThePathItIsGiven)
+INSTANTIATE_TEST_SUITE_P(, DnsOverHttpsElsewhere, protocols, protocol_name);
+
+TEST_P(DnsOverHttpsElsewhere, AsksAtThePathItIsGiven)
 {
    make_resolver(https({}, false, "/resolve"));
 
@@ -512,7 +589,7 @@ TEST_F(DnsOverHttpsElsewhere, AsksAtThePathItIsGiven)
    EXPECT_THAT(server.https_requests(), Each(Field(&https_request::path, "/resolve")));
 }
 
-TEST_F(DnsOverHttpsElsewhere, GivesUpOnAServerThatHasNothingAtThePath)
+TEST_P(DnsOverHttpsElsewhere, GivesUpOnAServerThatHasNothingAtThePath)
 {
    make_resolver(https({}, false));
 
@@ -525,13 +602,15 @@ TEST_F(DnsOverHttpsElsewhere, GivesUpOnAServerThatHasNothingAtThePath)
 
 // --------------------------------------------------------------------------------------------------
 
-class DnsOverHttpsOneStream : public DnsOverHttps
+class DnsOverHttpsOneStream : public DnsOverHttp2
 {
 protected:
    std::uint64_t max_streams() const override { return 1; }
 };
 
-TEST_F(DnsOverHttpsOneStream, SendsEachQueryOnceTheServerAllowsAnotherStream)
+INSTANTIATE_TEST_SUITE_P(, DnsOverHttpsOneStream, http2, protocol_name);
+
+TEST_P(DnsOverHttpsOneStream, SendsEachQueryOnceTheServerAllowsAnotherStream)
 {
    make_resolver(https({}, false));
 

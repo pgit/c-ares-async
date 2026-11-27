@@ -148,12 +148,16 @@ private:
       // server says it speaks (RFC 8484, section 5.2, recommends HTTP/2 at least).
       //
       self->m_url = make_url(self->options(), self->server_endpoint());
-      self->m_client.emplace(self->executor(),
-                             anyhttp::client::Config{.url = self->m_url,
-                                                     .endpoints = {self->server_endpoint()},
-                                                     .local_endpoint = self->local_endpoint(),
-                                                     .protocol = anyhttp::Protocol::h2,
-                                                     .tls_verify = self->options().verify});
+      anyhttp::client::Config config{.url = self->m_url,
+                                     .endpoints = {self->server_endpoint()},
+                                     .protocol = anyhttp::Protocol::h2,
+                                     .tls_verify = self->options().verify};
+      if (const auto& local = self->local_endpoint()) // see doq_bridge
+      {
+         config.local_address = local->address().to_string();
+         config.local_port = local->port();
+      }
+      self->m_client.emplace(self->executor(), std::move(config));
 
       //
       // Unless the bridge is stopped first: when_either() cancels the connection that is being
