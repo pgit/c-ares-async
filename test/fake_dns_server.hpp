@@ -19,6 +19,7 @@
 #include <boost/asio/any_io_executor.hpp>
 
 #if C_ARES_ASYNC_ANYHTTP
+#include <anyhttp/common.hpp>
 #include <anyhttp/runtime.hpp>
 #endif
 
@@ -153,12 +154,14 @@ public:
    const std::vector<unsigned>& quic_ids() const; // the message ID of every query, in order
 
    //
-   // Starts serving DNS over HTTPS on a port of its own, HTTP/2 and HTTP/1.1, the server
-   // presenting 'certificate', answering POSTs to 'path', and allowing a client 'max_streams'
-   // requests at once over HTTP/2. On 'executor', as for use_quic().
+   // Starts serving DNS over HTTPS on a port of its own, the server presenting 'certificate',
+   // answering POSTs to 'path', and allowing a client 'max_streams' requests at once over HTTP/2.
+   // 'protocol' is the most it speaks: HTTP/2 and HTTP/1.1, preferring HTTP/2, or HTTP/1.1 only,
+   // as a server without HTTP/2 does. On 'executor', as for use_quic().
    //
    void use_https(const anyhttp::Executor& executor, const test_certificate& certificate,
-                  std::string path = "/dns-query", std::uint64_t max_streams = 100);
+                  std::string path = "/dns-query", std::uint64_t max_streams = 100,
+                  anyhttp::Protocol protocol = anyhttp::Protocol::h2);
 
    //
    // Where it serves DNS over HTTPS, the way resolver::set_servers() takes it.

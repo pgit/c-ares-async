@@ -138,6 +138,7 @@ struct fake_dns_server::state : std::enable_shared_from_this<fake_dns_server::st
    test_certificate https_certificate; // for listening again
    std::string https_path;
    std::uint64_t https_max_streams = 100;
+   std::vector<anyhttp::Protocol> https_protocols; // what the server offers over TLS
    unsigned https_status = 0; // that every request is answered with, where not 0
    std::string https_content_type = "application/dns-message";
    bool https_hold = false;
@@ -642,13 +643,16 @@ anyhttp::Task<void> fake_dns_server::state::serve_quic_stream(std::shared_ptr<st
 
 void fake_dns_server::use_https(const anyhttp::Executor& executor,
                                 const test_certificate& certificate, std::string path,
-                                std::uint64_t max_streams)
+                                std::uint64_t max_streams, anyhttp::Protocol protocol)
 {
    spdlog::set_level(spdlog::level::warn); // see use_quic()
 
    m_state->https_certificate = certificate;
    m_state->https_path = std::move(path);
    m_state->https_max_streams = max_streams;
+   m_state->https_protocols = protocol == anyhttp::Protocol::h2
+                                 ? std::vector{anyhttp::Protocol::h2, anyhttp::Protocol::h1}
+                                 : std::vector{anyhttp::Protocol::h1};
    m_state->listen_https(executor, 0);
 }
 
@@ -673,6 +677,7 @@ void fake_dns_server::state::listen_https(const anyhttp::Executor& executor, std
                                                    .reuse_port = true,
                                                    .tls_certificate_chain = chain,
                                                    .tls_private_key = key,
+                                                   .tls_protocols = https_protocols,
                                                    .max_concurrent_streams = https_max_streams});
    std::remove(chain.c_str());
    std::remove(key.c_str());

@@ -104,8 +104,16 @@ What anyhttp needed
 
 anyhttp's client could not be told to take any certificate, nor where to connect from.
 `anyhttp#59 <https://github.com/pgit/anyhttp/pull/59>`__ added ``client::Config::tls_verify`` and
-``client::Config::local_endpoint``, as ``quic::Config`` has them. What it already had is
-``client::Config::endpoints``, to connect to the address c-ares has while the URL says the name.
+``client::Config::local_endpoint``, as ``quic::Config`` has them, and `anyhttp#61
+<https://github.com/pgit/anyhttp/pull/61>`__ made the endpoint ``client::Config::local_address`` and
+``client::Config::local_port``. What it already had is ``client::Config::endpoints``, to connect to
+the address c-ares has while the URL says the name.
+
+Nor could anyhttp's server be told to speak HTTP/1.1 only, over TLS: it took HTTP/2 wherever the
+client offered it, and the bridge always does. `anyhttp#62
+<https://github.com/pgit/anyhttp/pull/62>`__ added ``server::Config::tls_protocols``, with which
+the tests run against a server of each kind -- the one that speaks both, and the one that has no
+HTTP/2, which the bridge falls back to HTTP/1.1 for.
 
 What is not there
 -----------------

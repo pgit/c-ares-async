@@ -169,8 +169,11 @@ endif()
 
 #
 # anyhttp, for its QUIC and its HTTP client. Pinned, as Capy and Corosio are: at the merge of
-# https://github.com/pgit/anyhttp/pull/59, with which client::Config takes a local address and can
-# be told not to verify the certificate, as DNS over HTTPS needs. Before that,
+# https://github.com/pgit/anyhttp/pull/62, with which server::Config says what to offer over TLS,
+# for the tests of DNS over HTTPS on HTTP/1.1. https://github.com/pgit/anyhttp/pull/61 before that
+# has client::Config and quic::Config take the local address as a string and the port apart from
+# it, and https://github.com/pgit/anyhttp/pull/59 has client::Config take a local address and be
+# told not to verify the certificate, as DNS over HTTPS needs. Before that,
 # https://github.com/pgit/anyhttp/pull/56 has quic::Config take a local address and a device to
 # send from. https://github.com/pgit/anyhttp/pull/55 before that has open_stream() wait
 # for the server to allow another stream, https://github.com/pgit/anyhttp/pull/51 moved its Capy
@@ -206,7 +209,7 @@ if (C_ARES_ASYNC_ANYHTTP)
         FetchContent_Declare(
             anyhttp
             GIT_REPOSITORY https://github.com/pgit/anyhttp.git
-            GIT_TAG 907817fc8e0566315a1da56ed3df67009b05d201
+            GIT_TAG 736fa4810b7d4d5503f47fadb6df8cda0280206f
             EXCLUDE_FROM_ALL)
         FetchContent_MakeAvailable(anyhttp)
     elseif (DEFINED ANYHTTP_API AND NOT ANYHTTP_API STREQUAL C_ARES_ASYNC_API)

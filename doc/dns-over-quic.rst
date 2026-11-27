@@ -162,10 +162,14 @@ serve those that wait in the order they started; what it used to be is ``try_ope
 Nor could the client be told where to send from, which c-ares has an address for, of each family
 (`anyhttp#54 <https://github.com/pgit/anyhttp/issues/54>`__). `anyhttp#56
 <https://github.com/pgit/anyhttp/pull/56>`__ added ``quic::Config::local_endpoint``, and
-``quic::Config::device`` for an interface to send through.
+``quic::Config::device`` for an interface to send through. `anyhttp#61
+<https://github.com/pgit/anyhttp/pull/61>`__ made the endpoint ``quic::Config::local_address``, as
+text, and ``quic::Config::local_port``, which the bridge fills in from where c-ares binds its
+socket.
 
-The pin is at the merge of `anyhttp#59 <https://github.com/pgit/anyhttp/pull/59>`__, for DNS over
-HTTPS, see :doc:`dns-over-https`. It comes after anyhttp#56, anyhttp#55 and `anyhttp#51
+The pin is at the merge of `anyhttp#62 <https://github.com/pgit/anyhttp/pull/62>`__, for the tests
+of DNS over HTTPS, see :doc:`dns-over-https`. It comes after anyhttp#61, `anyhttp#59
+<https://github.com/pgit/anyhttp/pull/59>`__, anyhttp#56, anyhttp#55 and `anyhttp#51
 <https://github.com/pgit/anyhttp/pull/51>`__: that one moved anyhttp's Capy and Corosio to the
 commits this library pins.
 

@@ -96,14 +96,14 @@ private:
       };
 
       //
-      // The endpoint of the local address is made the way the event loop makes every other one
-      // from c-ares, and moved over into a UDP one the way anyhttp does that -- on Corosio, the
-      // two are the same type. anyhttp's io::from_sockaddr() would do it in one go, but it is in
-      // anyhttp/net.hpp, which is none of anyhttp's public headers and brings Asio's buffers along
-      // on Corosio, into every translation unit that includes the resolver.
+      // Where c-ares has bound its socket, which anyhttp takes as the address's text and the port
+      // apart from it.
       //
       if (const auto& local = self->local_endpoint())
-         config.local_endpoint = anyhttp::UdpEndpoint{local->address(), local->port()};
+      {
+         config.local_address = local->address().to_string();
+         config.local_port = local->port();
+      }
 
       //
       // To the address c-ares has for the server, which is all it has, with the certificate
